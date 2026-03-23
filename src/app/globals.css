@@ -1,26 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=DM+Serif+Display:ital@0;1&display=swap');
+
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --navy: #0F172A;
+  --navy-mid: #1E293B;
+  --navy-light: #263347;
+  --blue: #1B4FD8;
+  --blue-mid: #2563EB;
+  --blue-light: #3B82F6;
+  --blue-50: #EFF6FF;
+  --blue-100: #DBEAFE;
+  --green: #059669;
+  --green-50: #ECFDF5;
+  --red: #DC2626;
+  --red-50: #FEF2F2;
+  --amber: #D97706;
+  --amber-50: #FFFBEB;
+  --teal: #0891B2;
+  --purple: #7C3AED;
+  --orange: #EA580C;
+  --gray-50: #F8FAFC;
+  --gray-100: #F1F5F9;
+  --gray-200: #E2E8F0;
+  --gray-400: #94A3B8;
+  --gray-500: #64748B;
+  --gray-700: #334155;
+  --border: #E2E8F0;
+  --text: #0F172A;
+  --text-muted: #64748B;
+  --background: #F8FAFC;
+  --foreground: #0F172A;
+  --card: #FFFFFF;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-navy: var(--navy);
+  --color-navy-mid: var(--navy-mid);
+  --color-navy-light: var(--navy-light);
+  --color-brand: var(--blue);
+  --color-brand-mid: var(--blue-mid);
+  --color-brand-light: var(--blue-light);
+  --color-brand-50: var(--blue-50);
+  --color-brand-100: var(--blue-100);
+  --color-success: var(--green);
+  --color-success-50: var(--green-50);
+  --color-danger: var(--red);
+  --color-danger-50: var(--red-50);
+  --color-warning: var(--amber);
+  --color-warning-50: var(--amber-50);
+  --color-teal: var(--teal);
+  --color-purple: var(--purple);
+  --color-orange: var(--orange);
+  --color-muted: var(--text-muted);
+  --color-border: var(--border);
+  --color-surface: var(--gray-50);
+  --color-surface-100: var(--gray-100);
+  --color-surface-200: var(--gray-200);
+  --font-sans: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+  --font-display: 'DM Serif Display', serif;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-full: 9999px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ABSOLUTE RULE: Zero shadows anywhere */
+*,
+*::before,
+*::after {
+  box-shadow: none !important;
 }
