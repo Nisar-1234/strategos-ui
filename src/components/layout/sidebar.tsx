@@ -8,12 +8,13 @@ import {
   ChartBarIcon,
   ChatBubbleLeftRightIcon,
   SignalIcon,
-  MagnifyingGlassCircleIcon,
   GlobeAltIcon,
   NewspaperIcon,
-  ChartBarSquareIcon,
   CpuChipIcon,
-  Cog6ToothIcon,
+  CircleStackIcon,
+  KeyIcon,
+  SparklesIcon,
+  AcademicCapIcon,
 } from "@heroicons/react/24/outline";
 
 const navGroups = [
@@ -27,29 +28,30 @@ const navGroups = [
   {
     label: "Analysis",
     items: [
+      { name: "AI Chat", href: "/analysis/ai-chat", icon: ChatBubbleLeftRightIcon },
       { name: "Game Theory", href: "/analysis/game-theory", icon: CpuChipIcon },
-      { name: "AI Analysis", href: "/analysis/ai-chat", icon: ChatBubbleLeftRightIcon },
     ],
   },
   {
     label: "Signals",
     items: [
-      { name: "Signal Monitor", href: "/signals/monitor", icon: SignalIcon },
-      { name: "Cmd Center", href: "/signals/command", icon: MagnifyingGlassCircleIcon },
-      { name: "Markets", href: "/signals/markets", icon: ChartBarSquareIcon },
+      { name: "Signals", href: "/signals/monitor", icon: SignalIcon },
     ],
   },
   {
-    label: "Live",
+    label: "Live Feed",
     items: [
-      { name: "Geo Map", href: "/live/map", icon: GlobeAltIcon },
-      { name: "News Live", href: "/live/news", icon: NewspaperIcon },
+      { name: "Map", href: "/live/map", icon: GlobeAltIcon },
+      { name: "News", href: "/live/news", icon: NewspaperIcon },
     ],
   },
   {
     label: "Config",
     items: [
-      { name: "Settings", href: "/config/settings", icon: Cog6ToothIcon },
+      { name: "Data Sources", href: "/config/data-sources", icon: CircleStackIcon },
+      { name: "API Keys", href: "/config/api-keys", icon: KeyIcon },
+      { name: "LLM Settings", href: "/config/llm-settings", icon: SparklesIcon },
+      { name: "Skills", href: "/config/skills", icon: AcademicCapIcon },
     ],
   },
 ];
@@ -64,7 +66,7 @@ export function Sidebar() {
           STRATEGOS
         </div>
         <div className="text-[10px] text-gray-700 uppercase tracking-[0.1em] mt-0.5">
-          Intelligence Platform
+          Geopolitical Intelligence
         </div>
       </div>
 
