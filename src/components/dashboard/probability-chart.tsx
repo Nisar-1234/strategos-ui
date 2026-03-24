@@ -21,8 +21,8 @@ export function ProbabilityChart({ data }: ProbabilityChartProps) {
       <h3 className="text-[11px] font-semibold text-navy mb-2 shrink-0">
         Conflict Outcome Probability -- 30 Days
       </h3>
-      <div className="flex-1 min-h-[160px]">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="flex-1 min-h-[160px]" style={{ minWidth: 0 }}>
+        <ResponsiveContainer width="100%" height={180}>
           <LineChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: -20 }}>
             <XAxis
               dataKey="day"

@@ -1,3 +1,4 @@
+import React from "react";
 import { cn } from "@/lib/utils";
 import type { gameTheorySummary } from "@/lib/mock-data";
 
@@ -31,11 +32,8 @@ export function GameTheoryMini({ data }: GameTheoryMiniProps) {
               </div>
             ))}
             {data.headers.rows.map((row, ri) => (
-              <>
-                <div
-                  key={`row-${row}`}
-                  className="bg-navy rounded-[2px] p-1 text-[8px] text-center text-gray-400"
-                >
+              <React.Fragment key={`row-${ri}`}>
+                <div className="bg-navy rounded-[2px] p-1 text-[8px] text-center text-gray-400">
                   {row}
                 </div>
                 {data.matrix[ri].map((cell, ci) => (
@@ -49,7 +47,7 @@ export function GameTheoryMini({ data }: GameTheoryMiniProps) {
                     {cell}
                   </div>
                 ))}
-              </>
+              </React.Fragment>
             ))}
           </div>
           {data.nashEquilibrium && (
