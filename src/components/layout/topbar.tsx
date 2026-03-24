@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { UserCircleIcon } from "@heroicons/react/24/outline";
 
 interface TopbarProps {
@@ -9,18 +10,28 @@ interface TopbarProps {
 }
 
 export function Topbar({ title, subtitle, children }: TopbarProps) {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const timeStr = now.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZoneName: "short",
-  });
+  const [timeStr, setTimeStr] = useState("");
+
+  useEffect(() => {
+    function update() {
+      const now = new Date();
+      const date = now.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+      const time = now.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZoneName: "short",
+      });
+      setTimeStr(`${date} ${time}`);
+    }
+    update();
+    const id = setInterval(update, 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <header className="bg-card border-b border-border px-5 py-2.5 flex items-center justify-between shrink-0">
@@ -32,9 +43,11 @@ export function Topbar({ title, subtitle, children }: TopbarProps) {
       </div>
       <div className="flex items-center gap-2">
         {children}
-        <div className="text-[10px] text-muted bg-surface border border-border rounded-md px-2.5 py-1 font-mono">
-          {dateStr} {timeStr}
-        </div>
+        {timeStr && (
+          <div className="text-[10px] text-muted bg-surface border border-border rounded-md px-2.5 py-1 font-mono">
+            {timeStr}
+          </div>
+        )}
         <div className="w-7 h-7 rounded-full bg-brand flex items-center justify-center">
           <UserCircleIcon className="w-4 h-4 text-white" />
         </div>
