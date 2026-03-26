@@ -1,4 +1,16 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api-production-ccc0.up.railway.app";
+/**
+ * Production: set `NEXT_PUBLIC_API_URL` to your public **HTTPS** API base (e.g. API Gateway
+ * `https://xxxxx.execute-api.region.amazonaws.com`, or a custom domain in front of EC2).
+ * Local dev falls back to http://localhost:8000 when unset.
+ */
+function getApiBase(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (process.env.NODE_ENV === "development") return "http://localhost:8000";
+  return "";
+}
+
+const API_BASE = getApiBase();
 
 export async function apiFetch<T = unknown>(
   path: string,
@@ -20,6 +32,27 @@ export async function apiFetch<T = unknown>(
   return res.json();
 }
 
+/**
+ * Attempt an API call; if the backend is unreachable return the fallback value.
+ * This lets every page work in "offline" mode with mock data while seamlessly
+ * switching to live data when the API is running.
+ */
+export async function apiFetchWithFallback<T>(
+  fetcher: () => Promise<T>,
+  fallback: T,
+): Promise<{ data: T; live: boolean }> {
+  try {
+    const data = await fetcher();
+    return { data, live: true };
+  } catch {
+    return { data: fallback, live: false };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Shared types                                                       */
+/* ------------------------------------------------------------------ */
+
 export interface ApiSignal {
   id: string;
   layer: string;
@@ -34,13 +67,77 @@ export interface ApiSignal {
   conflict_id?: string | null;
 }
 
+export interface ApiConflict {
+  id: string;
+  name: string;
+  region: string;
+  status: string;
+  description: string | null;
+  created_at: string;
+}
+
+export interface ApiPrediction {
+  id: string;
+  conflict_id: string;
+  conflict_name: string;
+  escalation_prob: number;
+  negotiation_prob: number;
+  stalemate_prob: number;
+  resolution_prob: number;
+  confidence: string;
+  convergence_score: number;
+  created_at: string;
+}
+
+export interface ApiGameTheoryResult {
+  payoff_matrix: number[][];
+  nash_equilibria: Record<string, string>[];
+  dominant_strategies: Record<string, string>;
+  recommended_strategy: string;
+  rationale: string;
+  confidence: string;
+  actor_labels: Record<string, string[]>;
+}
+
+export interface ApiChatResponse {
+  analysis: string;
+  probabilities: Record<string, number> | null;
+  convergence_score: number | null;
+  sources: { name: string; layer: string; bias_score: number | null }[];
+  confidence: string;
+  session_id: string;
+}
+
+export interface ApiHealthResponse {
+  status: string;
+  service: string;
+  version: string;
+  timestamp: string;
+  layers: Record<string, string>;
+}
+
+export interface ApiSetting {
+  key: string;
+  value: string;
+  category: string;
+  updated_at: string;
+}
+
+export interface ApiTimeseriesBucket {
+  timestamp: string;
+  layer: string;
+  signal_count: number;
+  avg_score: number;
+  avg_confidence: number;
+  alert_count: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  API client                                                         */
+/* ------------------------------------------------------------------ */
+
 export const api = {
-  health: () => apiFetch<{
-    status: string;
-    version: string;
-    timestamp: string;
-    layers: Record<string, string>;
-  }>("/api/v1/health"),
+  health: () => apiFetch<ApiHealthResponse>("/api/v1/health"),
 
   signals: (params?: { layer?: string; alert_only?: boolean; limit?: number }) => {
     const sp = new URLSearchParams();
@@ -57,8 +154,77 @@ export const api = {
   signalsCount: () =>
     apiFetch<Record<string, number>>("/api/v1/signals/count"),
 
-  conflicts: () => apiFetch("/api/v1/conflicts"),
-  predictions: () => apiFetch("/api/v1/predictions"),
+  signalsTimeseries: (params?: { layer?: string; days?: number; bucket?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.layer) sp.set("layer", params.layer);
+    if (params?.days) sp.set("days", String(params.days));
+    if (params?.bucket) sp.set("bucket", params.bucket);
+    const qs = sp.toString();
+    return apiFetch<ApiTimeseriesBucket[]>(`/api/v1/signals/timeseries${qs ? `?${qs}` : ""}`);
+  },
+
+  conflicts: (params?: { status?: string; region?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.status) sp.set("status", params.status);
+    if (params?.region) sp.set("region", params.region);
+    const qs = sp.toString();
+    return apiFetch<ApiConflict[]>(`/api/v1/conflicts${qs ? `?${qs}` : ""}`);
+  },
+
+  conflict: (id: string) => apiFetch<ApiConflict>(`/api/v1/conflicts/${id}`),
+
+  conflictConvergence: (id: string, days = 30) =>
+    apiFetch<{ conflict_id: string; scores: { timestamp: string; score: number }[] }>(
+      `/api/v1/conflicts/${id}/convergence?days=${days}`,
+    ),
+
+  predictions: (params?: { confidence?: string; limit?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.confidence) sp.set("confidence", params.confidence);
+    if (params?.limit) sp.set("limit", String(params.limit));
+    const qs = sp.toString();
+    return apiFetch<ApiPrediction[]>(`/api/v1/predictions${qs ? `?${qs}` : ""}`);
+  },
+
+  prediction: (id: string) => apiFetch<ApiPrediction>(`/api/v1/predictions/${id}`),
+
+  gameTheory: (conflictId: string, actors?: string[]) =>
+    apiFetch<ApiGameTheoryResult>("/api/v1/game-theory/compute", {
+      method: "POST",
+      body: JSON.stringify({ conflict_id: conflictId, actors }),
+    }),
+
+  chat: (message: string, conflictId?: string, sessionId?: string) =>
+    apiFetch<ApiChatResponse>("/api/v1/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        conflict_id: conflictId,
+        session_id: sessionId,
+      }),
+    }),
+
+  settings: (category?: string) => {
+    const qs = category ? `?category=${category}` : "";
+    return apiFetch<ApiSetting[]>(`/api/v1/settings${qs}`);
+  },
+
+  settingsApiKeys: () => apiFetch<ApiSetting[]>("/api/v1/settings/api-keys"),
+
+  settingsLlm: () => apiFetch<ApiSetting[]>("/api/v1/settings/llm"),
+
+  settingsPreferences: () => apiFetch<ApiSetting[]>("/api/v1/settings/preferences"),
+
+  saveSetting: (key: string, value: string, category: string) =>
+    apiFetch<{ status: string; key: string }>(`/api/v1/settings/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ key, value, category }),
+    }),
+
+  deleteSetting: (key: string) =>
+    apiFetch<{ status: string; key: string }>(`/api/v1/settings/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+    }),
 };
 
 const LAYER_META: Record<string, { name: string; badgeClass: string; dotColor: string }> = {
