@@ -1,7 +1,7 @@
 /**
- * Production: set `NEXT_PUBLIC_API_URL` to your public **HTTPS** API base (e.g. API Gateway
- * `https://xxxxx.execute-api.region.amazonaws.com`, or a custom domain in front of EC2).
- * Local dev falls back to http://localhost:8000 when unset.
+ * Set `NEXT_PUBLIC_API_URL` to your Amplify site URL (e.g. https://xxx.amplifyapp.com) so
+ * `/api/v1/...` calls hit the same origin; Amplify Hosting rewrite rules proxy them to EC2.
+ * Local dev falls back to http://localhost:8000.
  */
 function getApiBase(): string {
   const fromEnv = process.env.NEXT_PUBLIC_API_URL?.trim();

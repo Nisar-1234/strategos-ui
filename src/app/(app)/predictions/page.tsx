@@ -1,153 +1,226 @@
 "use client";
 
-import { Topbar } from "@/components/layout/topbar";
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
-  FunnelIcon,
-  MagnifyingGlassIcon,
-  CalendarIcon,
   EyeIcon,
-  ArrowTrendingUpIcon,
+  ArrowDownTrayIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CalendarIcon,
 } from "@heroicons/react/24/outline";
+import { api, type ApiPrediction } from "@/lib/api";
+import { useApiData } from "@/hooks/use-api-data";
 
-const predictions = [
-  { name: "Russia-Ukraine Conflict", probability: 73, confidence: "HIGH" as const, status: "Active", updated: "2m ago" },
-  { name: "Taiwan Strait Tensions", probability: 62, confidence: "MEDIUM" as const, status: "Active", updated: "5m ago" },
-  { name: "Sudan Civil Conflict", probability: 58, confidence: "HIGH" as const, status: "Monitoring", updated: "12m ago" },
-  { name: "Iran Nuclear Deal", probability: 45, confidence: "MEDIUM" as const, status: "Active", updated: "18m ago" },
-  { name: "South China Sea Dispute", probability: 41, confidence: "LOW" as const, status: "Monitoring", updated: "25m ago" },
-  { name: "Kashmir Border Tensions", probability: 38, confidence: "MEDIUM" as const, status: "Active", updated: "32m ago" },
-  { name: "Yemen Civil War", probability: 35, confidence: "LOW" as const, status: "Monitoring", updated: "45m ago" },
-];
+/* All data from live API — no mock fallback */
 
-const confidenceBadge = {
+const confidenceBadge: Record<string, string> = {
   HIGH: "bg-green-50 text-green-700 border border-green-200",
   MEDIUM: "bg-amber-50 text-amber-700 border border-amber-200",
   LOW: "bg-gray-100 text-gray-500 border border-gray-200",
 };
 
-const accuracyTrend = [78, 80, 82, 81, 84, 83, 84.7];
+function timeAgo(isoDate: string): string {
+  const diff = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.round(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+  return `${Math.floor(mins / 1440)}d ago`;
+}
+
+function DonutChart({ segments }: { segments: { label: string; pct: number; color: string }[] }) {
+  const radius = 40;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <svg width="120" height="120" viewBox="0 0 100 100" className="rotate-[-90deg]">
+        {segments.map((seg) => {
+          const dashLen = (seg.pct / 100) * circumference;
+          const gapLen = circumference - dashLen;
+          const el = (
+            <circle key={seg.label} cx="50" cy="50" r={radius} fill="none" stroke={seg.color} strokeWidth="12" strokeDasharray={`${dashLen} ${gapLen}`} strokeDashoffset={-offset} strokeLinecap="round" />
+          );
+          offset += dashLen;
+          return el;
+        })}
+      </svg>
+      <div className="flex flex-col gap-1.5 w-full">
+        {segments.map((seg) => (
+          <div key={seg.label} className="flex items-center gap-2 text-[11px]">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
+            <span className="text-navy">{seg.label}</span>
+            <span className="ml-auto font-semibold text-navy">{seg.pct}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function PredictionsPage() {
-  return (
-    <>
-      <Topbar title="Predictions" subtitle="Active prediction tracking and confidence analysis" />
-      <div className="flex-1 flex gap-4 p-4 overflow-auto">
-        <div className="flex-1 flex flex-col gap-4">
-          <div className="bg-card border border-border rounded-lg p-3 flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5 border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy">
-              <FunnelIcon className="w-3.5 h-3.5 text-muted" />
-              All Regions
-              <svg className="w-3 h-3 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </div>
-            <label className="flex items-center gap-2 text-[11px] text-navy cursor-pointer">
-              <div className="w-8 h-[18px] bg-gray-200 rounded-full relative">
-                <div className="absolute left-[2px] top-[2px] w-[14px] h-[14px] bg-white rounded-full" />
-              </div>
-              High Confidence Only
-            </label>
-            <div className="flex items-center gap-1.5 border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy">
-              <CalendarIcon className="w-3.5 h-3.5 text-muted" />
-              Jan 1, 2024 -- Jan 31, 2024
-            </div>
-            <div className="flex items-center gap-1.5 border border-border rounded-md px-2.5 py-1.5 text-[11px] text-muted ml-auto">
-              <MagnifyingGlassIcon className="w-3.5 h-3.5" />
-              Search predictions...
-            </div>
-          </div>
+  const { data: predictions, live } = useApiData({
+    fetcher: () => api.predictions({ limit: 50 }),
+    fallback: [] as ApiPrediction[],
+    pollInterval: 60_000,
+  });
 
-          <div className="bg-card border border-border rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Conflict Name</th>
-                  <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Probability</th>
-                  <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Confidence</th>
-                  <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Last Updated</th>
-                  <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {predictions.map((p) => (
-                  <tr key={p.name} className="border-b border-border last:border-b-0 hover:bg-surface transition-colors">
-                    <td className="px-4 py-3 text-[12px] font-medium text-navy">{p.name}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px] font-semibold text-navy w-8">{p.probability}%</span>
-                        <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-brand rounded-full" style={{ width: `${p.probability}%` }} />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={cn("px-2 py-0.5 rounded text-[9px] font-bold uppercase", confidenceBadge[p.confidence])}>
-                        {p.confidence}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-[11px] text-muted">{p.status}</td>
-                    <td className="px-4 py-3 text-[11px] text-muted">{p.updated}</td>
-                    <td className="px-4 py-3">
-                      <button className="flex items-center gap-1 text-[11px] text-brand hover:text-brand-mid transition-colors">
-                        <EyeIcon className="w-3.5 h-3.5" />
-                        View
-                      </button>
-                    </td>
+  const rows = useMemo(() => predictions.map((p) => {
+    const maxProb = Math.max(p.escalation_prob, p.negotiation_prob, p.stalemate_prob, p.resolution_prob);
+    return {
+      ...p,
+      probability: Math.round(maxProb * 100),
+      status: p.escalation_prob > 0.5 ? "Active" : "Monitoring",
+      updated: timeAgo(p.created_at),
+    };
+  }), [predictions]);
+
+  const stats = useMemo(() => {
+    const high = predictions.filter((p) => p.confidence === "HIGH").length;
+    const med = predictions.filter((p) => p.confidence === "MEDIUM").length;
+    const low = predictions.filter((p) => p.confidence === "LOW").length;
+    return [
+      { label: "Total Predictions", value: predictions.length },
+      { label: "High Confidence", value: high, accent: "text-blue-600" },
+      { label: "Medium Confidence", value: med },
+      { label: "Low Confidence", value: low },
+    ];
+  }, [predictions]);
+
+  const donutSegments = useMemo(() => {
+    const total = predictions.length || 1;
+    const high = predictions.filter((p) => p.confidence === "HIGH").length;
+    const med = predictions.filter((p) => p.confidence === "MEDIUM").length;
+    const low = predictions.filter((p) => p.confidence === "LOW").length;
+    return [
+      { label: "High Confidence", pct: Math.round((high / total) * 100), color: "#059669" },
+      { label: "Medium Confidence", pct: Math.round((med / total) * 100), color: "#D97706" },
+      { label: "Low Confidence", pct: Math.round((low / total) * 100), color: "#94A3B8" },
+    ];
+  }, [predictions]);
+
+  return (
+    <div className="flex-1 flex flex-col overflow-auto">
+      <div className="px-6 pt-5 pb-3 flex items-center justify-between">
+        <div>
+          <h1 className="text-[22px] font-bold text-navy leading-tight">Predictions</h1>
+          <p className="text-[12px] text-muted mt-0.5">Home / Predictions / Overview</p>
+        </div>
+        {live ? (
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
+        )}
+      </div>
+
+      <div className="px-6 pb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <select className="border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy bg-card appearance-none pr-7 cursor-pointer">
+            <option>All Regions</option>
+          </select>
+          <select className="border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy bg-card appearance-none pr-7 cursor-pointer">
+            <option>All Confidence</option>
+            <option>HIGH</option>
+            <option>MEDIUM</option>
+            <option>LOW</option>
+          </select>
+          <select className="border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy bg-card appearance-none pr-7 cursor-pointer">
+            <option>All Statuses</option>
+          </select>
+          <button className="border border-border rounded-md p-1.5 text-muted hover:text-navy transition-colors">
+            <CalendarIcon className="w-4 h-4" />
+          </button>
+          <button className="ml-auto flex items-center gap-1.5 bg-green-600 text-white rounded-lg px-3.5 py-1.5 text-[11px] font-medium hover:bg-green-700 transition-colors">
+            <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+            Export
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 flex gap-4 px-6 pb-6 overflow-auto">
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="bg-card border border-border rounded-lg overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-border">
+              <h2 className="text-[13px] font-semibold text-navy">All Predictions</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Prediction</th>
+                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Confidence</th>
+                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Probability</th>
+                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Last Updated</th>
+                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-12 text-center text-[12px] text-muted">Waiting for prediction workers to generate data...</td></tr>
+                  )}
+                  {rows.map((p) => (
+                    <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-surface transition-colors">
+                      <td className="px-4 py-3 text-[12px] font-medium text-navy">{p.conflict_name}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn("px-2 py-0.5 rounded text-[9px] font-bold uppercase", confidenceBadge[p.confidence] || confidenceBadge.LOW)}>
+                          {p.confidence}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-[12px] text-muted">{p.status}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-semibold text-navy w-8">{p.probability}%</span>
+                          <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${p.probability}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[12px] text-muted">{p.updated}</td>
+                      <td className="px-4 py-3">
+                        <button className="text-muted hover:text-navy transition-colors">
+                          <EyeIcon className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-center gap-3 px-4 py-3 border-t border-border">
+              <button className="p-1 rounded border border-border text-muted hover:text-navy transition-colors">
+                <ChevronLeftIcon className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[11px] text-muted">Page 1 of {Math.ceil(rows.length / 10) || 1}</span>
+              <button className="p-1 rounded border border-border text-muted hover:text-navy transition-colors">
+                <ChevronRightIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="w-[240px] shrink-0 flex flex-col gap-4">
+        <div className="w-[280px] shrink-0 flex flex-col gap-4">
           <div className="bg-card border border-border rounded-lg p-4">
-            <h3 className="text-[11px] font-semibold text-navy mb-3">Prediction Stats</h3>
-            <div className="text-center mb-4">
-              <div className="text-[36px] font-bold text-navy leading-none">47</div>
-              <div className="text-[9px] text-muted uppercase tracking-wider mt-1">Total Predictions</div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <ArrowTrendingUpIcon className="w-3 h-3 text-green-600" />
-                  <span className="text-[11px] text-navy">High Confidence</span>
-                </div>
-                <span className="text-[12px] font-bold text-navy">12</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-[2px] bg-amber-500 rounded" />
-                  <span className="text-[11px] text-navy">Medium Confidence</span>
-                </div>
-                <span className="text-[12px] font-bold text-navy">18</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
-                  <span className="text-[11px] text-navy">Low Confidence</span>
-                </div>
-                <span className="text-[12px] font-bold text-navy">17</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card border border-border rounded-lg p-4">
-            <h3 className="text-[11px] font-semibold text-navy mb-3">Accuracy Trend</h3>
-            <div className="flex items-end gap-1 h-[40px] mb-3">
-              {accuracyTrend.map((v, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-                  <div className="w-2 h-2 rounded-full bg-brand" style={{ marginBottom: `${((v - 75) / 15) * 30}px` }} />
+            <h3 className="text-[13px] font-semibold text-navy mb-3">Prediction Statistics</h3>
+            <div className="grid grid-cols-2 gap-2.5">
+              {stats.map((s) => (
+                <div key={s.label} className="bg-surface rounded-md p-3 text-center">
+                  <div className={cn("text-[22px] font-bold leading-none", s.accent || "text-navy")}>{s.value}</div>
+                  <div className="text-[9px] text-muted uppercase tracking-wider mt-1">{s.label}</div>
                 </div>
               ))}
             </div>
-            <div className="text-center">
-              <div className="text-[28px] font-bold text-navy leading-none">84.7%</div>
-              <div className="text-[9px] text-muted mt-0.5">Current Accuracy</div>
-            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-lg p-4">
+            <h3 className="text-[13px] font-semibold text-navy mb-4">Confidence Breakdown</h3>
+            <DonutChart segments={donutSegments} />
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

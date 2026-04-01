@@ -1,122 +1,145 @@
 "use client";
 
+import { useMemo } from "react";
 import { Topbar } from "@/components/layout/topbar";
 import { cn } from "@/lib/utils";
+import { api, type ApiHealthResponse } from "@/lib/api";
+import { useApiData } from "@/hooks/use-api-data";
 
-const telegramChannels = ["@geopolitics_alerts", "@conflict_monitor", "@intel_reports"];
-const youtubeChannels = [
-  { name: "CNN International", subs: "12.4M" },
-  { name: "BBC World News", subs: "8.2M" },
-  { name: "Al Jazeera English", subs: "15.1M" },
-  { name: "Sky News", subs: "3.6M" },
+const LAYER_SOURCES: { layer: string; name: string; apis: string[]; healthKey: string }[] = [
+  { layer: "L1", name: "Editorial Media", apis: ["NewsAPI.org", "GDELT"], healthKey: "L1_editorial" },
+  {
+    layer: "L2",
+    name: "Social Media",
+    apis: ["Telegram (Telethon, primary)", "Reddit (supplementary)", "X (optional)"],
+    healthKey: "L2_social",
+  },
+  {
+    layer: "L3",
+    name: "Shipping / Maritime",
+    apis: ["Phase 2 — MarineTraffic AIS (not ingested yet)"],
+    healthKey: "L3_shipping",
+  },
+  { layer: "L4", name: "Aviation", apis: ["OpenSky Network"], healthKey: "L4_aviation" },
+  { layer: "L5", name: "Commodities", apis: ["Polygon.io", "Metals-API"], healthKey: "L5_commodities" },
+  { layer: "L6", name: "Forex / Currency", apis: ["Alpha Vantage", "Open Exchange Rates"], healthKey: "L6_currency" },
+  { layer: "L7", name: "Defense Equities", apis: ["Polygon.io"], healthKey: "L7_equities" },
+  {
+    layer: "L8",
+    name: "Satellite / Remote Sensing",
+    apis: ["NASA FIRMS (thermal)", "VIIRS VNP46A2 nighttime lights (CMR)"],
+    healthKey: "L8_satellite",
+  },
+  {
+    layer: "L9",
+    name: "Economic Indicators",
+    apis: ["FRED", "World Bank", "UN COMTRADE (trade flows)"],
+    healthKey: "L9_economic",
+  },
+  { layer: "L10", name: "Connectivity", apis: ["Cloudflare Radar", "IODA"], healthKey: "L10_connectivity" },
 ];
-const xAccounts = ["@StateDept", "@UN", "@NATO", "@POTUS", "@BBCWorld"];
-const newsApis = [
-  { name: "NewsAPI.org", status: "Connected" },
-  { name: "Reuters API", status: "Connected" },
-  { name: "GDELT API", status: "Pending" },
-];
+
+const LAYER_COLORS: Record<string, string> = {
+  L1: "bg-red-500", L2: "bg-indigo-500", L3: "bg-teal-500", L4: "bg-sky-500",
+  L5: "bg-amber-500", L6: "bg-purple-500", L7: "bg-emerald-500", L8: "bg-blue-500",
+  L9: "bg-orange-500", L10: "bg-red-600",
+};
 
 export default function DataSourcesPage() {
+  const { data: layerCounts, live } = useApiData<Record<string, number>>({
+    fetcher: () => api.signalsCount(),
+    fallback: {},
+    pollInterval: 60_000,
+  });
+
+  const { data: health } = useApiData<ApiHealthResponse>({
+    fetcher: () => api.health(),
+    fallback: { status: "unknown", service: "", version: "", timestamp: "", layers: {} },
+    pollInterval: 60_000,
+  });
+
+  const totalSignals = useMemo(() => Object.values(layerCounts).reduce((a, b) => a + b, 0), [layerCounts]);
+  const connectedLayers = useMemo(() => {
+    return LAYER_SOURCES.filter((ls) => {
+      const hk = health.layers?.[ls.healthKey];
+      return hk && hk !== "no_data";
+    }).length;
+  }, [health]);
+
+  const layerDetails = useMemo(() => {
+    return LAYER_SOURCES.map((ls) => {
+      const count = layerCounts[ls.layer] || 0;
+      const hk = health.layers?.[ls.healthKey];
+      let status: "active" | "stale" | "pending" = "pending";
+      if (live && hk === "active") status = "active";
+      else if (live && hk === "stale") status = "stale";
+      else if (live && count > 0) status = "active";
+      return { ...ls, count, status };
+    });
+  }, [layerCounts, health, live]);
+
   return (
     <>
-      <Topbar title="Data Sources" subtitle="Manage connected intelligence sources and channels" />
+      <Topbar title="Data Sources" subtitle="All 10 signal layer ingestion pipelines">
+        {live ? (
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> API CONNECTED
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
+        )}
+      </Topbar>
       <div className="flex-1 overflow-auto p-4">
+        {/* Summary row */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="bg-card border border-border rounded-lg p-4">
+            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">Total Signals Ingested</p>
+            <p className="text-[28px] font-bold text-navy leading-none">{totalSignals.toLocaleString()}</p>
+          </div>
+          <div className="bg-card border border-border rounded-lg p-4">
+            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">Active Layers</p>
+            <p className="text-[28px] font-bold text-success leading-none">{connectedLayers} / 10</p>
+          </div>
+          <div className="bg-card border border-border rounded-lg p-4">
+            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">System Status</p>
+            <p className={cn("text-[28px] font-bold leading-none",
+              health.status === "healthy" ? "text-success" : health.status === "degraded" ? "text-amber-500" : "text-red-500",
+            )}>
+              {health.status === "healthy" ? "Healthy" : health.status === "degraded" ? "Degraded" : live ? "Unhealthy" : "Connecting"}
+            </p>
+          </div>
+        </div>
+
+        {/* Layer grid */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-card border border-border rounded-lg p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-blue-500 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
-              </div>
-              <div>
-                <div className="text-[13px] font-semibold text-navy">Telegram</div>
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-50 text-green-700 border border-green-200">{telegramChannels.length} Active</span>
-              </div>
-            </div>
-            <div className="space-y-2.5 mb-4">
-              {telegramChannels.map((ch) => (
-                <div key={ch} className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-navy" />
-                  <span className="text-[11px] text-navy">{ch}</span>
+          {layerDetails.map((ld) => (
+            <div key={ld.layer} className="bg-card border border-border rounded-lg p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center text-white text-[11px] font-bold", LAYER_COLORS[ld.layer] || "bg-gray-500")}>
+                  {ld.layer}
                 </div>
-              ))}
-            </div>
-            <button className="text-[11px] text-brand font-medium hover:text-brand-mid flex items-center gap-1">
-              Manage <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-            </button>
-          </div>
-
-          <div className="bg-card border border-border rounded-lg p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-red-500 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-              </div>
-              <div>
-                <div className="text-[13px] font-semibold text-navy">YouTube</div>
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-50 text-green-700 border border-green-200">{youtubeChannels.length} Active</span>
-              </div>
-            </div>
-            <div className="space-y-2.5 mb-4">
-              {youtubeChannels.map((ch) => (
-                <div key={ch.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-navy" />
-                    <span className="text-[11px] text-navy">{ch.name}</span>
-                  </div>
-                  <span className="text-[10px] text-muted">{ch.subs}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold text-navy">{ld.name}</div>
+                  <div className="text-[10px] text-muted">{ld.apis.join(" · ")}</div>
                 </div>
-              ))}
-            </div>
-            <button className="text-[11px] text-brand font-medium hover:text-brand-mid flex items-center gap-1">
-              Manage <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-            </button>
-          </div>
-
-          <div className="bg-card border border-border rounded-lg p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-black flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                <span className={cn("px-2 py-0.5 rounded text-[9px] font-bold border",
+                  ld.status === "active" ? "bg-green-50 text-green-700 border-green-200" :
+                  ld.status === "stale" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                  "bg-gray-100 text-gray-500 border-gray-200",
+                )}>
+                  {ld.status === "active" ? "Active" : ld.status === "stale" ? "Stale" : "Pending"}
+                </span>
               </div>
-              <div>
-                <div className="text-[13px] font-semibold text-navy">X Accounts</div>
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-50 text-green-700 border border-green-200">{xAccounts.length} Active</span>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-muted">Signals ingested</span>
+                <span className="font-semibold text-navy">{ld.count.toLocaleString()}</span>
               </div>
-            </div>
-            <div className="space-y-2.5 mb-4">
-              {xAccounts.slice(0, 3).map((acc) => (
-                <div key={acc} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-navy" />
-                    <span className="text-[11px] text-navy">{acc}</span>
-                  </div>
-                  <div className="w-8 h-[18px] bg-brand rounded-full relative"><div className="absolute right-[2px] top-[2px] w-[14px] h-[14px] bg-white rounded-full" /></div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-card border border-border rounded-lg p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-gray-500 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" /></svg>
-              </div>
-              <div>
-                <div className="text-[13px] font-semibold text-navy">News APIs</div>
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-50 text-green-700 border border-green-200">{newsApis.length} Connected</span>
+              <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className={cn("h-full rounded-full transition-all", LAYER_COLORS[ld.layer] || "bg-gray-400")}
+                  style={{ width: `${totalSignals > 0 ? Math.max(2, (ld.count / totalSignals) * 100) : 0}%` }} />
               </div>
             </div>
-            <div className="space-y-2.5 mb-4">
-              {newsApis.map((api) => (
-                <div key={api.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-navy" />
-                    <span className="text-[11px] text-navy">{api.name}</span>
-                  </div>
-                  <span className={cn("text-[10px] font-medium", api.status === "Connected" ? "text-green-600" : "text-amber-500")}>{api.status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          ))}
         </div>
       </div>
     </>

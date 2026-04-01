@@ -15,6 +15,7 @@ import {
   KeyIcon,
   SparklesIcon,
   AcademicCapIcon,
+  ArrowTrendingUpIcon,
 } from "@heroicons/react/24/outline";
 
 const navGroups = [
@@ -30,6 +31,7 @@ const navGroups = [
     items: [
       { name: "AI Chat", href: "/analysis/ai-chat", icon: ChatBubbleLeftRightIcon },
       { name: "Game Theory", href: "/analysis/game-theory", icon: CpuChipIcon },
+      { name: "Trend Analysis", href: "/analysis/trend-analysis", icon: ArrowTrendingUpIcon },
     ],
   },
   {

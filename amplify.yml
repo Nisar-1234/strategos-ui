@@ -1,4 +1,4 @@
-# AWS Amplify Hosting — Next.js (WEB_COMPUTE). Set NEXT_PUBLIC_API_URL in the Amplify console to your HTTPS API URL.
+# AWS Amplify Hosting — Next.js (WEB_COMPUTE). Proxy rules for /api/* are set on the Amplify app (custom rules).
 version: 1
 frontend:
   phases:

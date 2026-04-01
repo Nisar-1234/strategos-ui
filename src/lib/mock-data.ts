@@ -33,8 +33,9 @@ export const liveSignals: Signal[] = [
     id: "s1",
     layer: "L3",
     layerName: "SHIPPING",
-    source: "MarineTraffic AIS",
-    content: "Hormuz tanker traffic -38% vs 7d baseline. 4 vessels rerouted via Cape of Good Hope since 06:00 UTC.",
+    source: "L3 Phase 2",
+    content:
+      "MarineTraffic AIS not live yet — Phase 2. (Demo placeholder; real signals require AIS integration.)",
     timeAgo: "4m",
     badgeClass: "bg-teal/10 text-teal border-teal/30",
     dotColor: "#0891B2",
@@ -95,10 +96,22 @@ export const liveSignals: Signal[] = [
     layer: "L2",
     layerName: "SOCIAL",
     source: "Telegram",
-    content: "Unverified reports of IDF movement near Rafah. Volume spike: +340% vs 24h avg. Bot-filter: 18% automated.",
+    content:
+      "Primary L2: channel volume spike. Supplementary: Reddit r/worldnews — +340% vs 24h avg. Bot-filter: 18% automated.",
     timeAgo: "21m",
     badgeClass: "bg-purple/10 text-purple border-purple/30",
     dotColor: "#4F46E5",
+  },
+  {
+    id: "s8b",
+    layer: "L8",
+    layerName: "SAT",
+    source: "NASA FIRMS / VIIRS",
+    content:
+      "Thermal anomalies (FIRMS) + VIIRS VNP46A2 nighttime-lights coverage (CMR) — conflict-zone AOI proxy.",
+    timeAgo: "22m",
+    badgeClass: "bg-blue-500/10 text-blue-700 border-blue-500/30",
+    dotColor: "#2563EB",
   },
   {
     id: "s8",
