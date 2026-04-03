@@ -126,13 +126,32 @@ const { exportXlsx } = await import(/* webpackIgnore: true */ "./excel");
 
 ## Deployment
 
-**Amplify (manual zip deploy)** — Amplify is NOT git-connected. Branch is `main`. Deploy process:
+**Amplify (manual zip deploy)** — Amplify app is `WEB` platform (static hosting, not SSR). NOT git-connected. Branch is `main`. `next.config.ts` has `output: "export"` and `trailingSlash: true` which are required.
+
+Deploy process:
 
 ```bash
-npm run build
-# Then zip .next/ + public/ and use:
-aws amplify create-deployment --app-id drvv157cwdx9a --branch-name main --region us-east-1
-aws amplify start-deployment --app-id drvv157cwdx9a --branch-name main --job-id <id> --region us-east-1
+npm run build   # generates out/ directory (static HTML)
+
+# Zip with forward slashes (MUST use Node/JSZip — PowerShell Compress-Archive
+# creates backslash paths that Amplify's Linux servers can't resolve)
+node -e "
+const JSZip = require('jszip'), fs = require('fs'), path = require('path');
+const zip = new JSZip();
+function addDir(d, zp) {
+  for (const e of fs.readdirSync(d)) {
+    const full = path.join(d, e), p = zp ? zp+'/'+e : e;
+    fs.statSync(full).isDirectory() ? addDir(full, p) : zip.file(p, fs.readFileSync(full));
+  }
+}
+addDir('./out', '');
+zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}).then(b=>{fs.writeFileSync('deploy.zip',b);console.log('done',b.length);});
+"
+
+JOB=$(aws amplify create-deployment --app-id drvv157cwdx9a --branch-name main --region us-east-1 --query jobId --output text)
+URL=$(aws amplify create-deployment --app-id drvv157cwdx9a --branch-name main --region us-east-1 --query zipUploadUrl --output text)
+curl -X PUT -T deploy.zip "$URL"
+aws amplify start-deployment --app-id drvv157cwdx9a --branch-name main --job-id $JOB --region us-east-1
 ```
 
 Required Amplify env var: `NEXT_PUBLIC_API_URL=https://5yv5gp1p12.execute-api.us-east-1.amazonaws.com`
