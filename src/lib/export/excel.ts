@@ -1,4 +1,3 @@
-import * as XLSX from "xlsx";
 import type { ExportPayload } from "./types";
 
 function colWidth(header: string, rows: (string | number | null)[][], colIdx: number): number {
@@ -6,7 +5,9 @@ function colWidth(header: string, rows: (string | number | null)[][], colIdx: nu
   return Math.min(50, Math.max(header.length, maxData) + 2);
 }
 
-export function exportXlsx(payload: ExportPayload): Blob {
+export async function exportXlsx(payload: ExportPayload): Promise<Blob> {
+  const XLSX = await import("xlsx");
+
   const wb = XLSX.utils.book_new();
 
   // Summary sheet

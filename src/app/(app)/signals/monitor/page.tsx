@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { MagnifyingGlassIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import { api, mapApiSignal, type ApiSignal } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
-import { ExportButton } from "@/components/export/ExportButton";
+import { ExportButton } from "@/components/export/ExportButtonClient";
 import type { ExportPayload } from "@/lib/export/types";
 
 /* All data comes from the live API — no mock fallback */
@@ -153,6 +153,11 @@ export default function SignalMonitorPage() {
     ];
   }, [rawSignals]);
 
+  const layers = useMemo(() => {
+    const set = new Set(rawSignals.map((s) => s.layer));
+    return Array.from(set).sort();
+  }, [rawSignals]);
+
   const exportPayload = useMemo((): ExportPayload => {
     const alerts = rawSignals.filter((s) => s.alert_flag).length;
     return {
@@ -196,11 +201,6 @@ export default function SignalMonitorPage() {
   }, [rawSignals, filtered, distribution, sentimentData, layers]);
 
   const removeKeyword = (kw: string) => setKeywords((prev) => prev.filter((k) => k !== kw));
-
-  const layers = useMemo(() => {
-    const set = new Set(rawSignals.map((s) => s.layer));
-    return Array.from(set).sort();
-  }, [rawSignals]);
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">

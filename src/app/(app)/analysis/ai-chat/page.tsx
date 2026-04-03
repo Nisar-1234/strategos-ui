@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { PaperAirplaneIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
-import { ExportButton } from "@/components/export/ExportButton";
+import { ExportButton } from "@/components/export/ExportButtonClient";
 import type { ExportPayload } from "@/lib/export/types";
 import { api, type ApiChatResponse } from "@/lib/api";
 

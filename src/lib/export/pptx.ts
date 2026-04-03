@@ -1,8 +1,9 @@
-import pptxgen from "pptxgenjs";
 import type { ExportPayload } from "./types";
+import type pptxgen from "pptxgenjs";
 
 export async function exportPptx(payload: ExportPayload): Promise<Blob> {
-  const prs = new pptxgen();
+  const PptxGen = (await import("pptxgenjs")).default;
+  const prs = new PptxGen();
   prs.layout = "LAYOUT_WIDE"; // 13.33 x 7.5 inches
 
   // ── Slide 1: Title ──────────────────────────────────────────────────────────
@@ -99,7 +100,10 @@ export async function exportPptx(payload: ExportPayload): Promise<Blob> {
     const visibleRows = table.rows.slice(0, 25);
     const truncated = table.rows.length > 25;
 
-    const tableRows: pptxgen.TableRow[] = [
+    type TableRow = pptxgen.TableRow;
+    type TableCellProps = pptxgen.TableCellProps;
+
+    const tableRows: TableRow[] = [
       table.headers.map((h) => ({
         text: h,
         options: {
@@ -108,7 +112,7 @@ export async function exportPptx(payload: ExportPayload): Promise<Blob> {
           fill: { color: "0F172A" },
           fontSize: 8,
           align: "left",
-        } as pptxgen.TableCellProps,
+        } as TableCellProps,
       })),
       ...visibleRows.map((row, ri) =>
         row.map((c) => ({
@@ -118,7 +122,7 @@ export async function exportPptx(payload: ExportPayload): Promise<Blob> {
             color: "0F172A",
             fill: { color: ri % 2 === 0 ? "FFFFFF" : "F8FAFC" },
             align: "left",
-          } as pptxgen.TableCellProps,
+          } as TableCellProps,
         }))
       ),
     ];

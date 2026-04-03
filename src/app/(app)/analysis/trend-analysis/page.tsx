@@ -4,7 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { api, ApiTimeseriesBucket, ApiPrediction } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
-import { ExportButton } from "@/components/export/ExportButton";
+import { ExportButton } from "@/components/export/ExportButtonClient";
 import type { ExportPayload } from "@/lib/export/types";
 import {
   LineChart,

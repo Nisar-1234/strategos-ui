@@ -10,7 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { api, type ApiGameTheoryResult, type ApiConflict, type ApiPrediction } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
-import { ExportButton } from "@/components/export/ExportButton";
+import { ExportButton } from "@/components/export/ExportButtonClient";
 import type { ExportPayload } from "@/lib/export/types";
 
 type CellKind = "red" | "green" | "neutral";

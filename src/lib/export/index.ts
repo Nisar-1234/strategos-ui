@@ -27,7 +27,7 @@ export async function exportData(payload: ExportPayload, format: ExportFormat): 
   switch (format) {
     case "xlsx": {
       const { exportXlsx } = await import("./excel");
-      download(exportXlsx(payload), filename(payload.title, ".xlsx"));
+      download(await exportXlsx(payload), filename(payload.title, ".xlsx"));
       break;
     }
     case "pdf": {
