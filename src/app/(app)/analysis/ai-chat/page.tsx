@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { PaperAirplaneIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
+import { ExportButton } from "@/components/export/ExportButton";
+import type { ExportPayload } from "@/lib/export/types";
 import { api, type ApiChatResponse } from "@/lib/api";
 
 interface Message {
@@ -72,6 +74,27 @@ export default function AiChatPage() {
     }
   };
 
+  const exportPayload = useMemo((): ExportPayload => ({
+    title: "STRATEGOS — AI Analysis Transcript",
+    generated: new Date().toUTCString(),
+    stats: [
+      { label: "Messages",    value: messages.length },
+      { label: "Session ID",  value: sessionId ?? "—" },
+    ],
+    tables: [{
+      title: "Conversation",
+      headers: ["Role", "Message", "Confidence", "Convergence Score", "Sources"],
+      rows: messages.map((m) => [
+        m.role.toUpperCase(),
+        m.content.slice(0, 300),
+        m.confidence ?? "",
+        m.convergence_score != null ? `${m.convergence_score}/10` : "",
+        m.sources ? m.sources.map((s) => `${s.layer}:${s.name}`).join(", ") : "",
+      ]),
+    }],
+    notes: "AI responses powered by Claude via STRATEGOS signal layers.",
+  }), [messages, sessionId]);
+
   const suggestions = [
     "What is the current convergence score for the Gaza conflict?",
     "Analyze the Russia-Ukraine situation using game theory",
@@ -88,6 +111,7 @@ export default function AiChatPage() {
           <p className="text-[12px] text-muted mt-0.5">Natural language geopolitical intelligence powered by Claude</p>
         </div>
         <div className="flex items-center gap-2">
+          <ExportButton payload={exportPayload} />
           {live ? (
             <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> CONNECTED
