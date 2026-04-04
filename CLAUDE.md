@@ -53,7 +53,12 @@ src/app/
     ├── live/
     │   ├── map/page.tsx
     │   └── news/page.tsx
-    └── config/                 Settings / API keys / LLM config
+    └── config/
+        ├── api-keys/page.tsx
+        ├── data-sources/page.tsx
+        ├── llm-settings/page.tsx
+        ├── settings/page.tsx
+        └── skills/page.tsx
 ```
 
 ### Data fetching pattern
@@ -61,7 +66,7 @@ src/app/
 All pages are `"use client"` and use `useApiData` hook from `src/hooks/use-api-data.ts`:
 
 ```typescript
-const { data, live, loading } = useApiData({
+const { data, live, loading, refresh } = useApiData({
   fetcher: () => api.signals({ limit: 100 }),
   fallback: [] as ApiSignal[],
   pollInterval: 30_000,   // 0 = no polling
@@ -79,7 +84,13 @@ When the API is unreachable, `fallback` is used (pages remain functional with mo
 - `mapApiSignal` — transforms `ApiSignal` → enriched signal with `layerName`, `badgeClass`, `timeAgo`, etc.
 - `LAYER_META` (internal) — display metadata for L1–L10
 
-`NEXT_PUBLIC_API_URL` env var sets the API base URL. Falls back to `http://localhost:8000` in dev, empty string in production (requires env var for Amplify).
+`NEXT_PUBLIC_API_URL` env var sets the API base URL. Falls back to `http://localhost:8000` in dev, empty string in production — which breaks all API calls. **This var is baked into the bundle at build time.** `.env.production.local` (gitignored) holds it for local builds:
+
+```
+NEXT_PUBLIC_API_URL=https://5yv5gp1p12.execute-api.us-east-1.amazonaws.com
+```
+
+`/api/v1/health` returns `layers` keyed exactly as stored in DB: `L1`, `L2` … `L10`. Do not use human-readable names like `L1_editorial` when looking up health layer status.
 
 ### Export system
 
@@ -95,6 +106,8 @@ csv.ts        RFC-compliant CSV with stats header block
 text.ts       exportMarkdown() + exportTxt() — padded tables
 ```
 
+**useMemo TDZ rule**: In `"use client"` components, `const` declarations using `useMemo` are subject to JavaScript's Temporal Dead Zone during SSR. If a `useMemo` factory references another `const` that is declared later in the same component body, it causes `ReferenceError: Cannot access '...' before initialization` at build time. **Always declare referenced variables before the useMemos that use them.**
+
 **SSR critical**: `xlsx`, `jspdf`, and `pptxgenjs` use browser globals. Never import them at module level. Always load via `ExportButtonClient` which uses `next/dynamic` with `ssr: false`:
 
 ```typescript
@@ -103,10 +116,7 @@ import { ExportButton } from "@/components/export/ExportButtonClient";
 import type { ExportPayload } from "@/lib/export/types";
 ```
 
-If the `webpackIgnore` magic comment is needed on dynamic imports in `index.ts`, add it:
-```typescript
-const { exportXlsx } = await import(/* webpackIgnore: true */ "./excel");
-```
+This project uses **Turbopack** — `/* webpackIgnore: true */` comments have **no effect**. Do not add them.
 
 ### Design system — non-negotiable
 
@@ -148,10 +158,15 @@ addDir('./out', '');
 zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}).then(b=>{fs.writeFileSync('deploy.zip',b);console.log('done',b.length);});
 "
 
-JOB=$(aws amplify create-deployment --app-id drvv157cwdx9a --branch-name main --region us-east-1 --query jobId --output text)
-URL=$(aws amplify create-deployment --app-id drvv157cwdx9a --branch-name main --region us-east-1 --query zipUploadUrl --output text)
+# create-deployment must be called ONCE — parse both jobId and zipUploadUrl from one call
+RESULT=$(MSYS_NO_PATHCONV=1 aws amplify create-deployment --app-id drvv157cwdx9a --branch-name main --region us-east-1 --output json)
+JOB=$(echo $RESULT | node -e "let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).jobId))")
+URL=$(echo $RESULT | node -e "let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).zipUploadUrl))")
 curl -X PUT -T deploy.zip "$URL"
-aws amplify start-deployment --app-id drvv157cwdx9a --branch-name main --job-id $JOB --region us-east-1
+MSYS_NO_PATHCONV=1 aws amplify start-deployment --app-id drvv157cwdx9a --branch-name main --job-id $JOB --region us-east-1
+
+# If a deployment is stuck as PENDING, cancel it first:
+# MSYS_NO_PATHCONV=1 aws amplify stop-job --app-id drvv157cwdx9a --branch-name main --job-id <id> --region us-east-1
 ```
 
 Required Amplify env var: `NEXT_PUBLIC_API_URL=https://5yv5gp1p12.execute-api.us-east-1.amazonaws.com`

@@ -32,7 +32,7 @@ export const liveSignals: Signal[] = [
   {
     id: "s1",
     layer: "L3",
-    layerName: "SHIPPING",
+    layerName: "MARITIME",
     source: "L3 Phase 2",
     content:
       "MarineTraffic AIS not live yet — Phase 2. (Demo placeholder; real signals require AIS integration.)",

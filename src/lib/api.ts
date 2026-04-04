@@ -230,7 +230,7 @@ export const api = {
 const LAYER_META: Record<string, { name: string; badgeClass: string; dotColor: string }> = {
   L1:  { name: "MEDIA",   badgeClass: "bg-danger-50 text-danger border-danger/30",     dotColor: "#DC2626" },
   L2:  { name: "SOCIAL",  badgeClass: "bg-purple/10 text-purple border-purple/30",     dotColor: "#4F46E5" },
-  L3:  { name: "SHIPPING", badgeClass: "bg-teal/10 text-teal border-teal/30",          dotColor: "#0891B2" },
+  L3:  { name: "MARITIME", badgeClass: "bg-teal/10 text-teal border-teal/30",          dotColor: "#0891B2" },
   L4:  { name: "AVIATION", badgeClass: "bg-brand-50 text-brand border-brand/30",       dotColor: "#0284C7" },
   L5:  { name: "COMM",    badgeClass: "bg-warning-50 text-warning border-warning/30",  dotColor: "#D97706" },
   L6:  { name: "FX",      badgeClass: "bg-purple/10 text-purple border-purple/30",     dotColor: "#7C3AED" },

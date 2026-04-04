@@ -6,37 +6,46 @@ import { cn } from "@/lib/utils";
 import { api, type ApiHealthResponse } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
 
-const LAYER_SOURCES: { layer: string; name: string; apis: string[]; healthKey: string }[] = [
-  { layer: "L1", name: "Editorial Media", apis: ["NewsAPI.org", "GDELT"], healthKey: "L1_editorial" },
+/** Health API returns `layers` keyed as L1…L10 (same as DB `signals.layer`), not L1_editorial-style names. */
+const LAYER_SOURCES: { layer: string; name: string; apis: string[] }[] = [
+  { layer: "L1", name: "Editorial Media", apis: ["NewsAPI.org", "GDELT"] },
   {
     layer: "L2",
     name: "Social Media",
     apis: ["Telegram (Telethon, primary)", "Reddit (supplementary)", "X (optional)"],
-    healthKey: "L2_social",
   },
   {
     layer: "L3",
     name: "Shipping / Maritime",
-    apis: ["Phase 2 — MarineTraffic AIS (not ingested yet)"],
-    healthKey: "L3_shipping",
+    apis: [
+      "Phase 2 — MarineTraffic or equivalent AIS (vessel positions). Not UN Comtrade or Wikipedia.",
+    ],
   },
-  { layer: "L4", name: "Aviation", apis: ["OpenSky Network"], healthKey: "L4_aviation" },
-  { layer: "L5", name: "Commodities", apis: ["Polygon.io", "Metals-API"], healthKey: "L5_commodities" },
-  { layer: "L6", name: "Forex / Currency", apis: ["Alpha Vantage", "Open Exchange Rates"], healthKey: "L6_currency" },
-  { layer: "L7", name: "Defense Equities", apis: ["Polygon.io"], healthKey: "L7_equities" },
+  {
+    layer: "L4",
+    name: "Aviation",
+    apis: [
+      "OpenSky Network (ADS-B state vectors by region). ADS-B Exchange not integrated — see repo data.md.",
+    ],
+  },
+  { layer: "L5", name: "Commodities", apis: ["Polygon.io", "Alpha Vantage"] },
+  { layer: "L6", name: "Forex / Currency", apis: ["Open Exchange Rates"] },
+  { layer: "L7", name: "Defense Equities", apis: ["Polygon.io", "Alpha Vantage"] },
   {
     layer: "L8",
     name: "Satellite / Remote Sensing",
-    apis: ["NASA FIRMS (thermal)", "VIIRS VNP46A2 nighttime lights (CMR)"],
-    healthKey: "L8_satellite",
+    apis: [
+      "NASA FIRMS (thermal hotspots)",
+      "NASA CMR — VIIRS VNP46A2 metadata (not NASA EONET)",
+      "Sentinel Hub optical — planned Phase 2",
+    ],
   },
   {
     layer: "L9",
     name: "Economic Indicators",
     apis: ["FRED", "World Bank", "UN COMTRADE (trade flows)"],
-    healthKey: "L9_economic",
   },
-  { layer: "L10", name: "Connectivity", apis: ["Cloudflare Radar", "IODA"], healthKey: "L10_connectivity" },
+  { layer: "L10", name: "Connectivity", apis: ["Cloudflare Radar", "IODA"] },
 ];
 
 const LAYER_COLORS: Record<string, string> = {
@@ -46,22 +55,24 @@ const LAYER_COLORS: Record<string, string> = {
 };
 
 export default function DataSourcesPage() {
-  const { data: layerCounts, live } = useApiData<Record<string, number>>({
+  const { data: layerCounts, live: countLive } = useApiData<Record<string, number>>({
     fetcher: () => api.signalsCount(),
     fallback: {},
     pollInterval: 60_000,
   });
 
-  const { data: health } = useApiData<ApiHealthResponse>({
+  const { data: health, live: healthLive } = useApiData<ApiHealthResponse>({
     fetcher: () => api.health(),
     fallback: { status: "unknown", service: "", version: "", timestamp: "", layers: {} },
     pollInterval: 60_000,
   });
 
+  const live = countLive || healthLive;
+
   const totalSignals = useMemo(() => Object.values(layerCounts).reduce((a, b) => a + b, 0), [layerCounts]);
   const connectedLayers = useMemo(() => {
     return LAYER_SOURCES.filter((ls) => {
-      const hk = health.layers?.[ls.healthKey];
+      const hk = health.layers?.[ls.layer];
       return hk && hk !== "no_data";
     }).length;
   }, [health]);
@@ -69,7 +80,7 @@ export default function DataSourcesPage() {
   const layerDetails = useMemo(() => {
     return LAYER_SOURCES.map((ls) => {
       const count = layerCounts[ls.layer] || 0;
-      const hk = health.layers?.[ls.healthKey];
+      const hk = health.layers?.[ls.layer];
       let status: "active" | "stale" | "pending" = "pending";
       if (live && hk === "active") status = "active";
       else if (live && hk === "stale") status = "stale";
