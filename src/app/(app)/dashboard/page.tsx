@@ -1,98 +1,168 @@
 "use client";
 
+/**
+ * STRATEGOS Dashboard — redesigned for comprehensibility.
+ *
+ * Layout: three fixed columns
+ *   Left  — active conflicts ranked by convergence score
+ *   Centre — selected conflict: AI assessment + signal breakdown
+ *   Right  — live signals grouped by category
+ *
+ * Everything auto-selects the highest-convergence conflict on load.
+ * WebSocket keeps signals live without polling.
+ */
+
+import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
-import {
-  CheckCircleIcon,
-  GlobeAltIcon,
-  CircleStackIcon,
   ChevronRightIcon,
+  SignalIcon,
+  ExclamationTriangleIcon,
+  CheckCircleIcon,
+  MinusCircleIcon,
 } from "@heroicons/react/24/outline";
-import { api, mapApiSignal, type ApiSignal, type ApiPrediction, type ApiTimeseriesBucket, type ApiConflict, type ApiLayerStatus } from "@/lib/api";
+import {
+  api,
+  type ApiConflict,
+  type ApiPrediction,
+  type ApiLayerStatus,
+} from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
-import { useRealtime } from "@/hooks/use-realtime";
-import { useMemo } from "react";
+import { useRealtime, type RealtimeSignal } from "@/hooks/use-realtime";
 
-const confidenceBadge = {
-  HIGH: "bg-green-50 text-green-700 border border-green-200",
-  MED: "bg-amber-50 text-amber-700 border border-amber-200",
-  MEDIUM: "bg-amber-50 text-amber-700 border border-amber-200",
-  LOW: "bg-gray-100 text-gray-500 border border-gray-200",
-} as Record<string, string>;
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-const probabilityColor: Record<string, string> = {
-  HIGH: "bg-brand",
-  MED: "bg-warning",
-  MEDIUM: "bg-warning",
-  LOW: "bg-gray-300",
+function scoreBg(score: number) {
+  if (score >= 7) return "bg-red-500";
+  if (score >= 5) return "bg-amber-500";
+  return "bg-green-500";
+}
+
+function severityClass(sev: string | null) {
+  if (sev === "ALERT") return "bg-red-50 text-red-700 border-red-200";
+  if (sev === "WATCH") return "bg-amber-50 text-amber-700 border-amber-200";
+  return "bg-gray-100 text-gray-500 border-gray-200";
+}
+
+const LAYER_NAME: Record<string, string> = {
+  L1: "MEDIA", L2: "SOCIAL", L3: "MARITIME", L4: "AVIATION",
+  L5: "COMMODITIES", L6: "FX", L7: "EQUITY", L8: "SATELLITE",
+  L9: "ECONOMIC", L10: "CONNECTIVITY",
 };
 
-const LAYER_BADGE: Record<string, string> = {
-  L1: "bg-red-500", L2: "bg-indigo-500", L3: "bg-teal-500", L4: "bg-sky-500",
-  L5: "bg-amber-500", L6: "bg-purple-500", L7: "bg-emerald-500", L8: "bg-blue-500",
-  L9: "bg-orange-500", L10: "bg-red-600",
-};
+const SIGNAL_CATEGORIES: Array<{ key: string; layers: string[]; label: string }> = [
+  { key: "energy",   layers: ["L5"],      label: "ENERGY" },
+  { key: "financial",layers: ["L6","L7"], label: "FINANCIAL" },
+  { key: "satellite",layers: ["L8"],      label: "SATELLITE" },
+  { key: "economic", layers: ["L9"],      label: "ECONOMIC" },
+  { key: "connect",  layers: ["L10"],     label: "CONNECTIVITY" },
+  { key: "intel",    layers: ["L1","L2"], label: "INTELLIGENCE" },
+];
 
-function CircularProgress({ value }: { value: number }) {
-  const r = 20;
-  const circ = 2 * Math.PI * r;
-  const offset = circ - (value / 100) * circ;
+function timeAgo(ts: string) {
+  const diff = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+  if (diff < 1) return "just now";
+  if (diff < 60) return `${diff}m ago`;
+  if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+  return `${Math.floor(diff / 1440)}d ago`;
+}
+
+// ─── sub-components ───────────────────────────────────────────────────────────
+
+function ConflictRow({
+  conflict,
+  score,
+  delta,
+  selected,
+  onClick,
+}: {
+  conflict: ApiConflict;
+  score: number;
+  delta: number;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
-    <svg width={52} height={52} viewBox="0 0 52 52" className="shrink-0">
-      <circle cx="26" cy="26" r={r} fill="none" stroke="var(--gray-200)" strokeWidth="4" />
-      <circle cx="26" cy="26" r={r} fill="none" stroke="var(--blue)" strokeWidth="4"
-        strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset} transform="rotate(-90 26 26)" />
-      <text x="26" y="27" textAnchor="middle" dominantBaseline="middle" fontSize="10" fontWeight="700" fill="var(--navy)">
-        {value.toFixed(1)}%
-      </text>
-    </svg>
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full text-left px-4 py-3 border-b border-border transition-colors",
+        selected ? "bg-brand/8 border-l-2 border-l-brand" : "hover:bg-surface border-l-2 border-l-transparent"
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-[12px] font-semibold truncate", selected ? "text-brand" : "text-navy")}>
+            {conflict.name}
+          </p>
+          <p className="text-[10px] text-muted mt-0.5">{conflict.region}</p>
+        </div>
+        <div className="flex flex-col items-end shrink-0 gap-0.5">
+          <span className="text-[20px] font-bold text-navy leading-none font-mono">
+            {score > 0 ? score.toFixed(1) : "—"}
+          </span>
+          {delta !== 0 && (
+            <span className={cn("text-[10px] font-semibold", delta > 0 ? "text-red-600" : "text-green-600")}>
+              {delta > 0 ? "+" : ""}{delta.toFixed(1)}
+            </span>
+          )}
+        </div>
+      </div>
+      {score > 0 && (
+        <div className="mt-2 h-1 bg-gray-100 rounded-full overflow-hidden">
+          <div className={cn("h-full rounded-full", scoreBg(score))} style={{ width: `${score * 10}%` }} />
+        </div>
+      )}
+    </button>
   );
 }
 
+function SignalBadge({ sig }: { sig: RealtimeSignal }) {
+  return (
+    <div className="flex items-center justify-between py-1.5 border-b border-border last:border-b-0 gap-2">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-navy truncate">
+          {sig.source_name.replace(/^(Polygon|NewsAPI|CloudflareRadar|IODA|AV|OXR)\//,"")}&nbsp;
+          <span className="text-[10px] text-muted font-mono">{LAYER_NAME[sig.layer] ?? sig.layer}</span>
+        </p>
+        {sig.content && (
+          <p className="text-[10px] text-muted line-clamp-1 mt-0.5">{sig.content}</p>
+        )}
+      </div>
+      <div className="flex flex-col items-end gap-0.5 shrink-0">
+        <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase", severityClass(sig.alert_severity))}>
+          {sig.alert_severity ?? "NORMAL"}
+        </span>
+        {sig.deviation_pct != null && sig.deviation_pct !== 0 && (
+          <span className={cn("text-[9px] font-mono", sig.deviation_pct > 0 ? "text-red-600" : "text-green-600")}>
+            {sig.deviation_pct > 0 ? "+" : ""}{sig.deviation_pct.toFixed(1)}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LayerStatusDot({ status }: { status: string }) {
+  if (status === "ACTIVE")   return <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />;
+  if (status === "DEGRADED") return <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />;
+  return <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />;
+}
+
+// ─── main page ────────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
-  const { data: signalFeed, live: signalsLive } = useApiData<ApiSignal[]>({
-    fetcher: () => api.signalsFeed(10),
-    fallback: [],
-    pollInterval: 30_000,
-  });
-
-  const { data: layerCounts, live: countsLive } = useApiData<Record<string, number>>({
-    fetcher: () => api.signalsCount(),
-    fallback: {},
-    pollInterval: 60_000,
-  });
-
-  const { data: apiPredictions, live: predictionsLive } = useApiData<ApiPrediction[]>({
-    fetcher: () => api.predictions({ limit: 5 }),
-    fallback: [],
-    pollInterval: 60_000,
-  });
-
-  const { data: timeseries } = useApiData<ApiTimeseriesBucket[]>({
-    fetcher: () => api.signalsTimeseries({ days: 30, bucket: "1d" }),
-    fallback: [],
-    pollInterval: 120_000,
-  });
-
-  const { data: conflicts } = useApiData<ApiConflict[]>({
+  // ── data fetching ──────────────────────────────────────────────────────────
+  const { data: conflicts, live: conflictsLive } = useApiData<ApiConflict[]>({
     fetcher: () => api.conflicts(),
     fallback: [],
     pollInterval: 120_000,
   });
 
-  const { data: healthData } = useApiData<{ total_signals?: number; status?: string; database?: string; redis?: string }>({
-    fetcher: () => api.health(),
-    fallback: {},
-    pollInterval: 30_000,
+  const { data: predictions } = useApiData<ApiPrediction[]>({
+    fetcher: () => api.predictions({ limit: 20 }),
+    fallback: [],
+    pollInterval: 60_000,
   });
 
   const { data: layerStatuses } = useApiData<ApiLayerStatus[]>({
@@ -101,300 +171,316 @@ export default function DashboardPage() {
     pollInterval: 60_000,
   });
 
-  // Top conflict id for WebSocket subscription (first active conflict)
-  const topConflictId = conflicts.find((c) => c.status === "active")?.id ?? null;
-  const { signals: wsSignals, convergenceScore: wsConvergence, connected: wsConnected } = useRealtime(topConflictId);
+  // ── selected conflict ──────────────────────────────────────────────────────
+  const scoreMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const p of predictions) m[p.conflict_id] = p.convergence_score;
+    return m;
+  }, [predictions]);
 
-  const isLive = signalsLive || countsLive || predictionsLive;
+  const sortedConflicts = useMemo(
+    () => [...conflicts].sort((a, b) => (scoreMap[b.id] ?? 0) - (scoreMap[a.id] ?? 0)),
+    [conflicts, scoreMap]
+  );
 
-  const totalSignals = useMemo(() => Object.values(layerCounts).reduce((a, b) => a + b, 0), [layerCounts]);
-  const activeLayers = useMemo(() => Object.keys(layerCounts).length, [layerCounts]);
-  const mappedSignals = useMemo(() => signalFeed.map(mapApiSignal), [signalFeed]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedId
+    ? conflicts.find((c) => c.id === selectedId) ?? sortedConflicts[0] ?? null
+    : sortedConflicts[0] ?? null;
 
-  const highConfCount = useMemo(() => apiPredictions.filter((p) => p.confidence === "HIGH").length, [apiPredictions]);
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+  const { signals: wsSignals, convergenceScore: wsScore, connected: wsConnected } =
+    useRealtime(selected?.id ?? null);
 
-  const predictionAccuracy = useMemo(() => {
-    if (apiPredictions.length === 0) return 0;
-    const avgConv = apiPredictions.reduce((s, p) => s + p.convergence_score, 0) / apiPredictions.length;
-    return Math.min(99, avgConv * 10);
-  }, [apiPredictions]);
+  // Latest convergence score: prefer live WS, fall back to prediction
+  const liveScore = wsScore ?? (selected ? scoreMap[selected.id] ?? 0 : 0);
 
-  const predictions = useMemo(() => {
-    return apiPredictions.map((p) => {
-      const maxProb = Math.max(p.escalation_prob, p.negotiation_prob, p.stalemate_prob, p.resolution_prob);
-      const ago = Math.round((Date.now() - new Date(p.created_at).getTime()) / 60000);
-      const timeStr = ago < 60 ? `${ago}m ago` : ago < 1440 ? `${Math.floor(ago / 60)}h ago` : `${Math.floor(ago / 1440)}d ago`;
-      return {
-        name: p.conflict_name,
-        probability: Math.round(maxProb * 100),
-        confidence: p.confidence,
-        time: timeStr,
-      };
-    });
-  }, [apiPredictions]);
+  // ── selected conflict prediction ───────────────────────────────────────────
+  const selectedPred = useMemo(
+    () => predictions.find((p) => p.conflict_id === selected?.id) ?? null,
+    [predictions, selected]
+  );
 
-  const probabilityChart = useMemo(() => {
-    if (timeseries.length === 0) return [];
-    const byDay: Record<string, { day: string; avgScore: number; alerts: number; count: number }> = {};
-    for (const b of timeseries) {
-      const day = new Date(b.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      if (!byDay[day]) byDay[day] = { day, avgScore: 0, alerts: 0, count: 0 };
-      byDay[day].avgScore += b.avg_score * b.signal_count;
-      byDay[day].alerts += b.alert_count;
-      byDay[day].count += b.signal_count;
-    }
-    return Object.values(byDay).map((d) => {
-      const avg = d.count > 0 ? d.avgScore / d.count : 0;
-      const alertPct = d.count > 0 ? (d.alerts / d.count) * 100 : 0;
-      return {
-        day: d.day,
-        Escalation: Math.round(Math.max(5, Math.min(95, 50 - avg * 40 + alertPct * 0.5))),
-        Negotiation: Math.round(Math.max(5, Math.min(95, 30 + avg * 35))),
-        Stalemate: Math.round(Math.max(5, Math.min(95, 40 - alertPct * 0.3))),
-        Resolution: Math.round(Math.max(5, Math.min(95, 15 + avg * 20 - alertPct * 0.2))),
-      };
-    });
-  }, [timeseries]);
+  // ── signal breakdown for center panel (last 20 WS signals for this conflict)
+  const breakdownSignals = useMemo(
+    () => wsSignals.filter((s) => s.alert_severity !== "NORMAL").slice(0, 8),
+    [wsSignals]
+  );
 
-  const activityLog = useMemo(() => {
-    return signalFeed
-      .filter((s) => s.alert_flag)
-      .slice(0, 4)
-      .map((s) => {
-        const ts = new Date(s.timestamp);
-        return {
-          time: ts.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
-          color: s.alert_severity === "CRITICAL" ? "bg-red-500" : "bg-amber-500",
-          title: `${s.layer} Alert — ${s.source_name}`,
-          desc: s.content || "Signal alert detected",
-        };
-      });
-  }, [signalFeed]);
+  // ── group signals by category for right panel ──────────────────────────────
+  const categorised = useMemo(() => {
+    const all = wsSignals.slice(0, 40);
+    return SIGNAL_CATEGORIES.map((cat) => ({
+      ...cat,
+      signals: all.filter((s) => cat.layers.includes(s.layer)).slice(0, 5),
+    })).filter((cat) => cat.signals.length > 0);
+  }, [wsSignals]);
 
-  const gameTheorySummary = useMemo(() => {
-    if (apiPredictions.length === 0) return null;
-    const top = apiPredictions[0];
-    const strategies = [
-      { label: "Escalation", prob: top.escalation_prob },
-      { label: "Negotiation", prob: top.negotiation_prob },
-      { label: "Stalemate", prob: top.stalemate_prob },
-    ];
-    const dominant = strategies.reduce((a, b) => (b.prob > a.prob ? b : a));
-    return { conflict: top.conflict_name, dominant: dominant.label, strategies };
-  }, [apiPredictions]);
+  // ── offline layers count ───────────────────────────────────────────────────
+  const offlineCount = layerStatuses.filter((l) => l.status === "OFFLINE").length;
+  const activeCount  = layerStatuses.filter((l) => l.status === "ACTIVE").length;
 
+  // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 flex-1 overflow-y-auto bg-white">
-      <div className="flex items-center justify-end mb-2 gap-2">
-        {wsConnected && (
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[9px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" /> WS
-          </span>
-        )}
-        {layerStatuses.filter((l) => l.status === "OFFLINE").length > 0 && (
-          <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 text-[9px] font-bold">
-            {layerStatuses.filter((l) => l.status === "OFFLINE").length} LAYER{layerStatuses.filter((l) => l.status === "OFFLINE").length > 1 ? "S" : ""} OFFLINE
-          </span>
-        )}
-        {isLive ? (
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE DATA
-          </span>
-        ) : (
-          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
-        )}
-      </div>
+    <div className="flex h-full overflow-hidden bg-surface">
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        <div className="bg-card border border-border rounded-lg p-4 flex items-start justify-between">
-          <div>
-            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">Active Predictions</p>
-            <p className="text-[32px] font-bold text-brand leading-none">{apiPredictions.length}</p>
-            <p className="text-[11px] text-muted mt-1">{highConfCount} high confidence</p>
-          </div>
-          <CheckCircleIcon className="w-4 h-4 text-muted" />
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-4 flex items-start justify-between">
-          <div>
-            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">Total Signals</p>
-            <p className="text-[32px] font-bold text-navy leading-none">{totalSignals.toLocaleString()}</p>
-            <p className="text-[11px] text-muted mt-1">
-              <span className="inline-block w-2 h-2 rounded-full bg-warning mr-1 align-middle" />
-              {activeLayers} layers active
-            </p>
-          </div>
-          <GlobeAltIcon className="w-4 h-4 text-muted shrink-0" />
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-4 flex items-start justify-between">
-          <div>
-            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">Monitored Conflicts</p>
-            <p className="text-[32px] font-bold text-success leading-none">{conflicts.length}</p>
-            <p className="text-[11px] text-muted mt-1">{activeLayers} / 10 layers feeding</p>
-          </div>
-          <CircleStackIcon className="w-4 h-4 text-muted shrink-0" />
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-4 flex items-start justify-between">
-          <div>
-            <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-1">Avg Convergence</p>
-            <p className="text-[32px] font-bold text-navy leading-none">
-              {predictionAccuracy > 0 ? `${predictionAccuracy.toFixed(1)}%` : "—"}
-            </p>
-            <p className="text-[11px] text-muted mt-1">Last 30 days</p>
-          </div>
-          {predictionAccuracy > 0 && <CircularProgress value={predictionAccuracy} />}
-        </div>
-      </div>
-
-      {/* Three panels */}
-      <div className="grid grid-cols-[2fr_1.75fr_1.25fr] gap-3 mb-4">
-        {/* Predictions */}
-        <div className="bg-card border border-border rounded-lg p-4">
-          <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Top Active Predictions</h3>
-          <div className="space-y-0">
-            {predictions.length === 0 && (
-              <p className="text-[11px] text-muted py-4 text-center">Waiting for prediction workers...</p>
-            )}
-            {predictions.map((p, i) => (
-              <div key={p.name} className="flex items-center gap-2.5 py-2 border-b border-border last:border-b-0 group">
-                <span className="text-[11px] font-semibold text-muted w-4 shrink-0">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[12px] font-medium text-navy truncate">{p.name}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[11px] font-semibold text-navy w-8">{p.probability}%</span>
-                    <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={cn("h-full rounded-full", probabilityColor[p.confidence] || "bg-gray-300")} style={{ width: `${p.probability}%` }} />
-                    </div>
-                  </div>
-                </div>
-                <span className={cn("px-2 py-0.5 rounded text-[9px] font-bold uppercase shrink-0", confidenceBadge[p.confidence] || confidenceBadge.LOW)}>
-                  {p.confidence}
-                </span>
-                <span className="text-[10px] text-muted shrink-0 w-12 text-right">{p.time}</span>
-                <ChevronRightIcon className="w-3.5 h-3.5 text-muted shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Game Theory Summary */}
-        <div className="bg-card border border-border rounded-lg p-4">
-          <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Game Theory Summary</h3>
-          {gameTheorySummary ? (
-            <>
-              <p className="text-[11px] text-muted mb-2">{gameTheorySummary.conflict}</p>
-              <div className="space-y-2 mb-4">
-                {gameTheorySummary.strategies.map((s) => (
-                  <div key={s.label}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] text-navy">{s.label}</span>
-                      <span className="text-[11px] font-semibold text-navy">{(s.prob * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className={cn("h-full rounded-full",
-                        s.label === "Escalation" ? "bg-red-500" : s.label === "Negotiation" ? "bg-blue-500" : "bg-gray-400",
-                      )} style={{ width: `${s.prob * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-border pt-3">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <span className="w-2 h-2 rounded-full bg-success" />
-                  <span className="text-[11px] text-success font-semibold">Dominant Strategy</span>
-                </div>
-                <p className="text-[12px] font-semibold text-navy">{gameTheorySummary.dominant}</p>
-              </div>
-            </>
-          ) : (
-            <p className="text-[11px] text-muted py-4 text-center">Waiting for predictions data...</p>
-          )}
-        </div>
-
-        {/* Signal Feed */}
-        <div className="bg-card border border-border rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider">Signal Feed</h3>
-            {signalsLive && (
+      {/* ── LEFT: conflict list ─────────────────────────────────────────── */}
+      <div className="w-[220px] shrink-0 border-r border-border bg-card flex flex-col overflow-hidden">
+        <div className="px-4 pt-4 pb-2 border-b border-border">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-bold text-muted uppercase tracking-wider">Active Conflicts</span>
+            {conflictsLive && (
               <span className="flex items-center gap-1 text-[9px] text-green-600 font-bold">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
               </span>
             )}
           </div>
-          <div className="space-y-3">
-            {mappedSignals.length === 0 && (
-              <p className="text-[11px] text-muted py-4 text-center">Waiting for signal ingestion...</p>
-            )}
-            {mappedSignals.slice(0, 4).map((s) => (
-              <div key={s.id} className="border-b border-border pb-3 last:border-b-0 last:pb-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-white text-[7px] font-bold shrink-0", LAYER_BADGE[s.layer] || "bg-gray-400")}>
-                    {s.layer}
-                  </span>
-                  <span className="text-[11px] font-semibold text-navy truncate">{s.source}</span>
-                  <span className="text-[9px] text-muted ml-auto shrink-0">{s.timeAgo}</span>
-                </div>
-                <p className="text-[10px] text-muted leading-relaxed mb-1 line-clamp-2">{s.content}</p>
-                <span className={cn("text-[9px] font-medium px-1.5 py-0.5 rounded-full border", s.alertFlag ? "bg-red-50 text-red-600 border-red-200" : s.badgeClass)}>
-                  {s.layerName}
-                </span>
+          <p className="text-[10px] text-muted mt-0.5">{conflicts.length} monitored</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {sortedConflicts.length === 0 && (
+            <p className="text-[11px] text-muted text-center py-8">No conflicts seeded yet</p>
+          )}
+          {sortedConflicts.map((c) => (
+            <ConflictRow
+              key={c.id}
+              conflict={c}
+              score={scoreMap[c.id] ?? 0}
+              delta={0}
+              selected={selected?.id === c.id}
+              onClick={() => setSelectedId(c.id)}
+            />
+          ))}
+        </div>
+
+        {/* layer status summary */}
+        <div className="px-4 py-3 border-t border-border">
+          <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-2">Signal Layers</p>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+            {layerStatuses.slice(0, 10).map((l) => (
+              <div key={l.layer} className="flex items-center gap-1">
+                <LayerStatusDot status={l.status} />
+                <span className="text-[9px] font-mono text-muted">{l.layer}</span>
               </div>
             ))}
           </div>
+          {offlineCount > 0 && (
+            <p className="mt-2 text-[9px] text-red-600 font-semibold">{offlineCount} layer{offlineCount > 1 ? "s" : ""} offline</p>
+          )}
+          {layerStatuses.length === 0 && (
+            <p className="text-[9px] text-muted">Checking layers...</p>
+          )}
         </div>
       </div>
 
-      {/* Chart and Activity */}
-      <div className="grid grid-cols-[3fr_2fr] gap-3">
-        <div className="bg-card border border-border rounded-lg p-4">
-          <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">
-            Conflict Outcome Probability Over Time
-          </h3>
-          <div className="h-[240px]">
-            {probabilityChart.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={probabilityChart} margin={{ top: 4, right: 12, bottom: 4, left: -8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-200)" />
-                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-muted)" }} tickLine={false} axisLine={{ stroke: "var(--gray-200)" }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "var(--text-muted)" }} tickLine={false} axisLine={{ stroke: "var(--gray-200)" }} tickFormatter={(v: number) => `${v}%`} />
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid var(--border)", background: "var(--card)" }}
-                    formatter={(value) => [`${Number(value).toFixed(1)}%`]} />
-                  <Legend iconType="plainline" wrapperStyle={{ fontSize: 10, paddingBottom: 4 }} />
-                  <Line type="monotone" dataKey="Escalation" stroke="var(--red)" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
-                  <Line type="monotone" dataKey="Negotiation" stroke="var(--blue)" strokeWidth={1.5} dot={false} />
-                  <Line type="monotone" dataKey="Stalemate" stroke="var(--gray-400)" strokeWidth={1.5} dot={false} />
-                  <Line type="monotone" dataKey="Resolution" stroke="var(--green)" strokeWidth={1.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-[11px] text-muted">
-                Chart populates as signal timeseries data accumulates...
+      {/* ── CENTRE: conflict assessment ─────────────────────────────────── */}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden border-r border-border bg-white">
+        {selected ? (
+          <>
+            {/* header */}
+            <div className="px-5 pt-4 pb-3 border-b border-border">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h1 className="text-[15px] font-bold text-navy">{selected.name}</h1>
+                  <p className="text-[10px] text-muted mt-0.5">{selected.region} · {selected.status.toUpperCase()}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {wsConnected && (
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 text-[9px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" /> WS
+                    </span>
+                  )}
+                  <div className={cn(
+                    "px-3 py-1.5 rounded-lg text-center",
+                    liveScore >= 7 ? "bg-red-50 border border-red-200" :
+                    liveScore >= 5 ? "bg-amber-50 border border-amber-200" :
+                    "bg-green-50 border border-green-200"
+                  )}>
+                    <p className="text-[9px] font-bold text-muted uppercase tracking-wider">Convergence</p>
+                    <p className={cn(
+                      "text-[24px] font-bold leading-none font-mono",
+                      liveScore >= 7 ? "text-red-600" : liveScore >= 5 ? "text-amber-600" : "text-green-700"
+                    )}>
+                      {liveScore > 0 ? liveScore.toFixed(1) : "—"}
+                    </p>
+                  </div>
+                </div>
               </div>
-            )}
+
+              {/* outcome probabilities */}
+              {selectedPred && (
+                <div className="mt-3 grid grid-cols-4 gap-2">
+                  {[
+                    { label: "Escalation", value: selectedPred.escalation_prob, color: "bg-red-400" },
+                    { label: "Negotiation", value: selectedPred.negotiation_prob, color: "bg-blue-400" },
+                    { label: "Stalemate", value: selectedPred.stalemate_prob, color: "bg-gray-400" },
+                    { label: "Resolution", value: selectedPred.resolution_prob, color: "bg-green-400" },
+                  ].map((outcome) => (
+                    <div key={outcome.label}>
+                      <div className="flex justify-between items-baseline mb-1">
+                        <span className="text-[9px] text-muted">{outcome.label}</span>
+                        <span className="text-[10px] font-semibold font-mono text-navy">
+                          {Math.round(outcome.value * 100)}%
+                        </span>
+                      </div>
+                      <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full", outcome.color)} style={{ width: `${outcome.value * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* signal breakdown */}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-3">Signal Breakdown</p>
+
+              {breakdownSignals.length === 0 ? (
+                <div className="text-center py-10">
+                  <SignalIcon className="w-8 h-8 text-gray-200 mx-auto mb-3" />
+                  <p className="text-[12px] text-muted">Waiting for signal data</p>
+                  <p className="text-[10px] text-muted mt-1">
+                    {activeCount > 0 ? `${activeCount} layer${activeCount > 1 ? "s" : ""} active — signals will appear as ingestion runs` : "Start Celery workers to begin ingestion"}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {breakdownSignals.map((sig) => (
+                    <div key={sig.id} className={cn(
+                      "flex items-start gap-3 p-2.5 rounded-lg border",
+                      sig.alert_severity === "ALERT"
+                        ? "bg-red-50 border-red-200"
+                        : sig.alert_severity === "WATCH"
+                        ? "bg-amber-50 border-amber-200"
+                        : "bg-surface border-border"
+                    )}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className={cn(
+                            "text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase",
+                            severityClass(sig.alert_severity)
+                          )}>
+                            {sig.alert_severity ?? "NORMAL"}
+                          </span>
+                          <span className="text-[10px] text-muted font-mono">{LAYER_NAME[sig.layer] ?? sig.layer}</span>
+                          <span className="text-[10px] text-muted ml-auto">{timeAgo(sig.timestamp)}</span>
+                        </div>
+                        <p className="text-[11px] text-navy font-medium truncate">
+                          {sig.source_name.replace(/^(Polygon|NewsAPI|CloudflareRadar|IODA|AV|OXR)\//, "")}
+                        </p>
+                        {sig.content && (
+                          <p className="text-[10px] text-muted mt-0.5 line-clamp-2">{sig.content}</p>
+                        )}
+                      </div>
+                      {sig.deviation_pct != null && sig.deviation_pct !== 0 && (
+                        <div className="text-right shrink-0">
+                          <span className={cn(
+                            "text-[11px] font-semibold font-mono",
+                            sig.deviation_pct > 0 ? "text-red-600" : "text-green-600"
+                          )}>
+                            {sig.deviation_pct > 0 ? "+" : ""}{sig.deviation_pct.toFixed(1)}%
+                          </span>
+                          <p className="text-[9px] text-muted">vs 30d</p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* description / context */}
+              {selected.description && (
+                <div className="mt-5 pt-4 border-t border-border">
+                  <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-2">Context</p>
+                  <p className="text-[11px] text-muted leading-relaxed">{selected.description}</p>
+                </div>
+              )}
+            </div>
+
+            {/* action buttons */}
+            <div className="px-5 py-3 border-t border-border flex gap-2">
+              <a
+                href={`/analysis/ai-chat?conflict=${selected.id}`}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-brand text-white text-[11px] font-semibold rounded-lg hover:bg-brand/90 transition-colors"
+              >
+                Ask AI Chat
+                <ChevronRightIcon className="w-3 h-3" />
+              </a>
+              <a
+                href={`/analysis/game-theory?conflict=${selected.id}`}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-surface border border-border text-navy text-[11px] font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Game Theory
+                <ChevronRightIcon className="w-3 h-3" />
+              </a>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-[12px] text-muted">No conflicts loaded — check API connection</p>
+          </div>
+        )}
+      </div>
+
+      {/* ── RIGHT: live signals by category ─────────────────────────────── */}
+      <div className="w-[260px] shrink-0 flex flex-col overflow-hidden bg-card">
+        <div className="px-4 pt-4 pb-2 border-b border-border">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-bold text-muted uppercase tracking-wider">Live Signals</span>
+            <div className="flex items-center gap-1.5">
+              {wsConnected
+                ? <CheckCircleIcon className="w-3.5 h-3.5 text-green-500" />
+                : <MinusCircleIcon className="w-3.5 h-3.5 text-amber-400" />}
+              <span className={cn("text-[9px] font-bold", wsConnected ? "text-green-600" : "text-amber-500")}>
+                {wsConnected ? "LIVE" : "POLLING"}
+              </span>
+            </div>
           </div>
         </div>
 
-        <div className="bg-card border border-border rounded-lg p-4">
-          <h3 className="text-[10px] font-bold text-muted uppercase tracking-wider mb-3">Recent Alert Activity</h3>
-          <div className="space-y-0">
-            {activityLog.length === 0 && (
-              <p className="text-[11px] text-muted py-4 text-center">No alerts yet — signals are being ingested...</p>
-            )}
-            {activityLog.map((a) => (
-              <div key={`${a.time}-${a.title}`} className="flex gap-3 py-2.5 border-b border-border last:border-b-0">
-                <div className="flex flex-col items-center shrink-0">
-                  <span className="text-[10px] font-mono text-muted">{a.time}</span>
-                  <span className={cn("w-2.5 h-2.5 rounded-full mt-1.5", a.color)} />
+        <div className="flex-1 overflow-y-auto">
+          {categorised.length === 0 ? (
+            <div className="text-center py-12">
+              <ExclamationTriangleIcon className="w-7 h-7 text-gray-200 mx-auto mb-2" />
+              <p className="text-[11px] text-muted px-4">
+                Signal workers not yet running. Start Celery to see live data here.
+              </p>
+            </div>
+          ) : (
+            categorised.map((cat) => (
+              <div key={cat.key} className="border-b border-border last:border-b-0">
+                <div className="px-4 py-2 bg-surface">
+                  <span className="text-[9px] font-bold text-muted uppercase tracking-wider">{cat.label}</span>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[12px] font-semibold text-navy">{a.title}</p>
-                  <p className="text-[10px] text-muted leading-relaxed mt-0.5 line-clamp-2">{a.desc}</p>
+                <div className="px-4 py-1">
+                  {cat.signals.map((sig) => (
+                    <SignalBadge key={sig.id} sig={sig} />
+                  ))}
                 </div>
               </div>
-            ))}
+            ))
+          )}
+        </div>
+
+        {/* platform stats footer */}
+        <div className="px-4 py-3 border-t border-border">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <p className="text-[16px] font-bold text-navy leading-none">{conflicts.length}</p>
+              <p className="text-[8px] text-muted uppercase mt-0.5">Conflicts</p>
+            </div>
+            <div>
+              <p className="text-[16px] font-bold text-navy leading-none">{activeCount}</p>
+              <p className="text-[8px] text-muted uppercase mt-0.5">Layers On</p>
+            </div>
+            <div>
+              <p className={cn("text-[16px] font-bold leading-none", offlineCount > 0 ? "text-red-500" : "text-navy")}>
+                {offlineCount}
+              </p>
+              <p className="text-[8px] text-muted uppercase mt-0.5">Offline</p>
+            </div>
           </div>
         </div>
       </div>
