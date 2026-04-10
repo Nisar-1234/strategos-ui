@@ -61,10 +61,20 @@ export interface ApiSignal {
   timestamp: string;
   alert_flag: boolean;
   alert_severity: string | null;
+  deviation_pct: number | null;
   confidence: number;
   normalized_score?: number;
   raw_value?: number;
   conflict_id?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+export interface ApiLayerStatus {
+  layer: string;
+  status: "ACTIVE" | "DEGRADED" | "OFFLINE";
+  last_signal_at: string | null;
+  signal_count_24h: number;
 }
 
 export interface ApiConflict {
@@ -203,6 +213,9 @@ export const api = {
         session_id: sessionId,
       }),
     }),
+
+  layerStatus: () =>
+    apiFetch<ApiLayerStatus[]>("/api/v1/signals/layer-status"),
 
   settings: (category?: string) => {
     const qs = category ? `?category=${category}` : "";

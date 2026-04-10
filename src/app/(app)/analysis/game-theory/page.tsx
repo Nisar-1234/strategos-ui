@@ -10,8 +10,6 @@ import {
 } from "@heroicons/react/24/outline";
 import { api, type ApiGameTheoryResult, type ApiConflict, type ApiPrediction } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
-import { ExportButton } from "@/components/export/ExportButtonClient";
-import type { ExportPayload } from "@/lib/export/types";
 
 type CellKind = "red" | "green" | "neutral";
 
@@ -133,36 +131,6 @@ export default function GameTheoryPage() {
     return list;
   }, [pred]);
 
-  const exportPayload = useMemo((): ExportPayload => ({
-    title: "STRATEGOS — Game Theory Analysis",
-    subtitle: selectedConflict ? `Conflict: ${selectedConflict.name}` : undefined,
-    generated: new Date().toUTCString(),
-    stats: [
-      { label: "Recommended Strategy", value: displayStrategy },
-      { label: "Model Confidence",     value: confValue > 0 ? `${confValue.toFixed(1)}%` : "—" },
-      { label: "Total Signals",        value: totalSignals },
-      { label: "Nash Equilibrium",     value: nashEquilibria[0] ? `(${nashEquilibria[0].actor_a}, ${nashEquilibria[0].actor_b})` : "—" },
-    ],
-    tables: [
-      ...(outcomes.length > 0 ? [{
-        title: "Outcome Probability Distribution",
-        headers: ["Outcome", "Probability %"],
-        rows: outcomes.map((o) => [o.name, o.pct]),
-      }] : []),
-      ...(actions.length > 0 ? [{
-        title: "Recommended Actions",
-        headers: ["#", "Priority", "Action"],
-        rows: actions.map((a, i) => [i + 1, a.priority, a.label]),
-      }] : []),
-      ...(displayMatrix ? [{
-        title: "Strategic Payoff Matrix",
-        headers: ["Strategy / Actor B →", ...displayCols],
-        rows: displayMatrix.map((row, ri) => [displayRows[ri] ?? `R${ri}`, ...row.map((c) => c.v)]),
-      }] : []),
-    ],
-    notes: displayRationale,
-  }), [selectedConflict, displayStrategy, confValue, totalSignals, nashEquilibria, outcomes, actions, displayMatrix, displayCols, displayRows, displayRationale]);
-
   const treeBranches = useMemo(() => {
     if (!pred) return [];
     const esc = Math.round(pred.escalation_prob * 100);
@@ -232,7 +200,6 @@ export default function GameTheoryPage() {
               </svg>
             </div>
           )}
-          <ExportButton payload={exportPayload} />
           <button onClick={runAnalysis} disabled={running || !selectedConflict}
             className="flex items-center gap-1.5 bg-brand text-white px-4 py-2 rounded-lg text-[12px] font-medium hover:bg-brand-mid transition-colors disabled:opacity-50">
             {running ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}

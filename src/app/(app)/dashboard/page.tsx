@@ -17,8 +17,9 @@ import {
   CircleStackIcon,
   ChevronRightIcon,
 } from "@heroicons/react/24/outline";
-import { api, mapApiSignal, type ApiSignal, type ApiPrediction, type ApiTimeseriesBucket, type ApiConflict } from "@/lib/api";
+import { api, mapApiSignal, type ApiSignal, type ApiPrediction, type ApiTimeseriesBucket, type ApiConflict, type ApiLayerStatus } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
+import { useRealtime } from "@/hooks/use-realtime";
 import { useMemo } from "react";
 
 const confidenceBadge = {
@@ -93,6 +94,16 @@ export default function DashboardPage() {
     fallback: {},
     pollInterval: 30_000,
   });
+
+  const { data: layerStatuses } = useApiData<ApiLayerStatus[]>({
+    fetcher: () => api.layerStatus(),
+    fallback: [],
+    pollInterval: 60_000,
+  });
+
+  // Top conflict id for WebSocket subscription (first active conflict)
+  const topConflictId = conflicts.find((c) => c.status === "active")?.id ?? null;
+  const { signals: wsSignals, convergenceScore: wsConvergence, connected: wsConnected } = useRealtime(topConflictId);
 
   const isLive = signalsLive || countsLive || predictionsLive;
 
@@ -175,6 +186,16 @@ export default function DashboardPage() {
   return (
     <div className="p-4 flex-1 overflow-y-auto bg-white">
       <div className="flex items-center justify-end mb-2 gap-2">
+        {wsConnected && (
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[9px] font-bold">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" /> WS
+          </span>
+        )}
+        {layerStatuses.filter((l) => l.status === "OFFLINE").length > 0 && (
+          <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 text-[9px] font-bold">
+            {layerStatuses.filter((l) => l.status === "OFFLINE").length} LAYER{layerStatuses.filter((l) => l.status === "OFFLINE").length > 1 ? "S" : ""} OFFLINE
+          </span>
+        )}
         {isLive ? (
           <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE DATA

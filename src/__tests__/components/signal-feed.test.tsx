@@ -18,14 +18,14 @@ describe("SignalFeed", () => {
 
   it("renders layer badges for each signal", () => {
     render(<SignalFeed signals={liveSignals.slice(0, 3)} />);
-    expect(screen.getByText("L3 SHIPPING")).toBeInTheDocument();
+    expect(screen.getByText("L3 MARITIME")).toBeInTheDocument();
     expect(screen.getByText("L1 MEDIA")).toBeInTheDocument();
     expect(screen.getByText("L5 COMM")).toBeInTheDocument();
   });
 
   it("renders signal content text", () => {
     render(<SignalFeed signals={liveSignals.slice(0, 1)} />);
-    expect(screen.getByText(/Hormuz tanker traffic/)).toBeInTheDocument();
+    expect(screen.getByText(/MarineTraffic AIS not live yet/)).toBeInTheDocument();
   });
 
   it("renders time ago labels", () => {
