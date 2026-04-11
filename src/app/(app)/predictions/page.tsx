@@ -4,13 +4,15 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
   EyeIcon,
-  ArrowDownTrayIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CalendarIcon,
 } from "@heroicons/react/24/outline";
 import { api, type ApiPrediction } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
+import { ExportButton } from "@/components/export/ExportButtonClient";
+import type { ExportPayload } from "@/lib/export/types";
+import { SnapshotButton } from "@/components/export/SnapshotButton";
 
 /* All data from live API — no mock fallback */
 
@@ -100,6 +102,28 @@ export default function PredictionsPage() {
     ];
   }, [predictions]);
 
+  const exportPayload: ExportPayload = useMemo(() => ({
+    title: "Conflict Predictions",
+    subtitle: "STRATEGOS Intelligence Platform",
+    generated: new Date().toUTCString(),
+    stats: stats.map((s) => ({ label: s.label, value: s.value })),
+    tables: [{
+      title: "All Predictions",
+      headers: ["Conflict", "Confidence", "Status", "Escalation %", "Negotiation %", "Stalemate %", "Resolution %", "Convergence Score", "Last Updated"],
+      rows: rows.map((p) => [
+        p.conflict_name,
+        p.confidence,
+        p.status,
+        `${Math.round(p.escalation_prob * 100)}%`,
+        `${Math.round(p.negotiation_prob * 100)}%`,
+        `${Math.round(p.stalemate_prob * 100)}%`,
+        `${Math.round(p.resolution_prob * 100)}%`,
+        p.convergence_score.toFixed(2),
+        p.updated,
+      ]),
+    }],
+  }), [rows, stats]);
+
   return (
     <div className="flex-1 flex flex-col overflow-auto">
       <div className="px-6 pt-5 pb-3 flex items-center justify-between">
@@ -133,10 +157,10 @@ export default function PredictionsPage() {
           <button className="border border-border rounded-md p-1.5 text-muted hover:text-navy transition-colors">
             <CalendarIcon className="w-4 h-4" />
           </button>
-          <button className="ml-auto flex items-center gap-1.5 bg-green-600 text-white rounded-lg px-3.5 py-1.5 text-[11px] font-medium hover:bg-green-700 transition-colors">
-            <ArrowDownTrayIcon className="w-3.5 h-3.5" />
-            Export
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <SnapshotButton filename={`STRATEGOS_predictions_${new Date().toISOString().slice(0,10)}.png`} />
+            <ExportButton payload={exportPayload} />
+          </div>
         </div>
       </div>
 
