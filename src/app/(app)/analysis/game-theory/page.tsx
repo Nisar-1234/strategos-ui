@@ -10,6 +10,9 @@ import {
 } from "@heroicons/react/24/outline";
 import { api, type ApiGameTheoryResult, type ApiConflict, type ApiPrediction } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
+import { ExportButton } from "@/components/export/ExportButtonClient";
+import type { ExportPayload } from "@/lib/export/types";
+import { SnapshotButton } from "@/components/export/SnapshotButton";
 
 type CellKind = "red" | "green" | "neutral";
 
@@ -159,6 +162,70 @@ export default function GameTheoryPage() {
     ];
   }, [pred]);
 
+  const exportPayload = useMemo<ExportPayload>(() => {
+    const tables: ExportPayload["tables"] = [];
+
+    if (displayMatrix) {
+      tables.push({
+        title: "Strategic Payoff Matrix",
+        headers: ["", ...displayCols],
+        rows: displayMatrix.map((row, ri) => [
+          displayRows[ri] ?? `R${ri}`,
+          ...row.map((c) => c.v),
+        ]),
+      });
+    }
+
+    if (nashEquilibria.length > 0) {
+      tables.push({
+        title: "Nash Equilibria",
+        headers: ["Actor A", "Actor B"],
+        rows: nashEquilibria.map((n) => [n.actor_a, n.actor_b]),
+      });
+    }
+
+    if (outcomes.length > 0) {
+      tables.push({
+        title: "Outcome Probabilities",
+        headers: ["Outcome", "%"],
+        rows: outcomes.map((o) => [o.name, o.pct]),
+      });
+    }
+
+    if (actions.length > 0) {
+      tables.push({
+        title: "Recommended Actions",
+        headers: ["Priority", "Action"],
+        rows: actions.map((a) => [a.priority, a.label]),
+      });
+    }
+
+    tables.push({
+      title: "Strategy Summary",
+      headers: ["Recommended Strategy", "Rationale"],
+      rows: [[displayStrategy, displayRationale]],
+    });
+
+    return {
+      title: "Game Theory Analysis",
+      subtitle: selectedConflict?.name,
+      generated: new Date().toUTCString(),
+      stats: [
+        { label: "Conflict", value: selectedConflict?.name ?? "—" },
+        { label: "Strategy", value: displayStrategy },
+        { label: "Confidence", value: String(displayConfidence) },
+        { label: "Signals Analyzed", value: totalSignals },
+      ],
+      tables,
+      notes: nashEquilibria.length > 0
+        ? `Nash Equilibrium: (${nashEquilibria[0]?.actor_a}, ${nashEquilibria[0]?.actor_b}) — ${displayConfidence} confidence`
+        : undefined,
+    };
+  }, [
+    displayMatrix, displayCols, displayRows, nashEquilibria, outcomes, actions,
+    displayStrategy, displayRationale, displayConfidence, selectedConflict, totalSignals,
+  ]);
+
   return (
     <div className="flex-1 overflow-auto p-4">
       <div className="flex items-center gap-1.5 text-[10px] text-muted mb-2">
@@ -205,6 +272,8 @@ export default function GameTheoryPage() {
             {running ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <PlayIcon className="w-4 h-4" />}
             {running ? "Computing..." : "Run Analysis"}
           </button>
+          <ExportButton payload={exportPayload} />
+          <SnapshotButton filename="STRATEGOS_game_theory.png" />
         </div>
       </div>
 

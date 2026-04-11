@@ -5,6 +5,9 @@ import { cn } from "@/lib/utils";
 import { MagnifyingGlassIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import { api, mapApiSignal, type ApiSignal } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
+import { ExportButton } from "@/components/export/ExportButtonClient";
+import type { ExportPayload } from "@/lib/export/types";
+import { SnapshotButton } from "@/components/export/SnapshotButton";
 
 /* All data comes from the live API — no mock fallback */
 
@@ -158,6 +161,42 @@ export default function SignalMonitorPage() {
     return Array.from(set).sort();
   }, [rawSignals]);
 
+  const exportPayload = useMemo<ExportPayload>(() => ({
+    title: "Signal Monitoring",
+    subtitle: sourceFilter !== "all" ? `Layer: ${sourceFilter}` : undefined,
+    generated: new Date().toUTCString(),
+    stats: [
+      { label: "Total Signals", value: rawSignals.length },
+      { label: "Filtered", value: filtered.length },
+      { label: "Layers Active", value: layers.length },
+    ],
+    tables: [
+      {
+        title: "Signal Feed",
+        headers: ["Layer", "Source", "Content", "Confidence %", "Sentiment", "Time Ago"],
+        rows: filtered.map((s) => [
+          s.mapped.layer,
+          s.mapped.source,
+          s.mapped.content,
+          s.relevance,
+          s.sentiment,
+          `${s.mapped.timeAgo} ago`,
+        ]),
+      },
+      {
+        title: "Layer Distribution",
+        headers: ["Layer", "Signal %"],
+        rows: distribution.map((d) => [d.source, d.pct]),
+      },
+      {
+        title: "Sentiment Distribution",
+        headers: ["Sentiment", "%"],
+        rows: sentimentData.map((s) => [s.label, s.pct]),
+      },
+    ],
+    notes: keywords.length > 0 ? `Keyword alerts: ${keywords.join(", ")}` : undefined,
+  }), [filtered, rawSignals, distribution, sentimentData, layers, sourceFilter, keywords]);
+
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
       {/* Header */}
@@ -194,6 +233,8 @@ export default function SignalMonitorPage() {
           <button onClick={refresh} className="h-8 px-2.5 rounded-md border border-border bg-card text-navy hover:bg-surface-100 flex items-center gap-1 text-[11px]">
             <ArrowPathIcon className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh
           </button>
+          <ExportButton payload={exportPayload} />
+          <SnapshotButton filename="STRATEGOS_signal_monitor.png" />
         </div>
       </div>
 
