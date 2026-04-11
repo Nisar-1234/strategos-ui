@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   CalendarIcon,
@@ -74,6 +75,7 @@ const legendItems = [
 ];
 
 export default function GeoMapPage() {
+  const router = useRouter();
   const [activeCategory, setActiveCategory] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -311,7 +313,11 @@ export default function GeoMapPage() {
                   </div>
                 </div>
               </div>
-              <button className="w-full mt-4 py-2 rounded-md bg-brand text-white text-[11px] font-semibold hover:bg-brand-mid transition-colors">
+              <button
+                type="button"
+                onClick={() => router.push("/analysis/trend-analysis")}
+                className="w-full mt-4 py-2 rounded-md bg-brand text-white text-[11px] font-semibold hover:bg-brand-mid transition-colors"
+              >
                 Full Analysis
               </button>
             </>

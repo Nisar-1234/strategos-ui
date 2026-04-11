@@ -12,7 +12,7 @@
  * WebSocket keeps signals live without polling.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import {
   ChevronRightIcon,
@@ -26,6 +26,7 @@ import {
   type ApiConflict,
   type ApiPrediction,
   type ApiLayerStatus,
+  type ApiSignal,
 } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
 import { useRealtime, type RealtimeSignal } from "@/hooks/use-realtime";
@@ -192,6 +193,19 @@ export default function DashboardPage() {
   const { signals: wsSignals, convergenceScore: wsScore, connected: wsConnected } =
     useRealtime(selected?.id ?? null);
 
+  const selectedSignalConflictId = selected?.id ?? null;
+  const { data: conflictSignalsRest, refresh: refreshConflictSignals } = useApiData<ApiSignal[]>({
+    fetcher: () => api.conflictSignals(selectedSignalConflictId!, { limit: 50 }),
+    fallback: [],
+    pollInterval: 60_000,
+    skip: !selectedSignalConflictId,
+  });
+
+  useEffect(() => {
+    if (!selectedSignalConflictId) return;
+    refreshConflictSignals();
+  }, [selectedSignalConflictId, refreshConflictSignals]);
+
   // Latest convergence score: prefer live WS, fall back to prediction
   const liveScore = wsScore ?? (selected ? scoreMap[selected.id] ?? 0 : 0);
 
@@ -201,11 +215,18 @@ export default function DashboardPage() {
     [predictions, selected]
   );
 
-  // ── signal breakdown for center panel (last 20 WS signals for this conflict)
-  const breakdownSignals = useMemo(
-    () => wsSignals.filter((s) => s.alert_severity !== "NORMAL").slice(0, 8),
-    [wsSignals]
-  );
+  // ── signal breakdown: WS for selected conflict, else REST /conflicts/{id}/signals
+  const breakdownSignals = useMemo(() => {
+    const cid = selected?.id;
+    if (!cid) return [];
+    const wsScoped = wsSignals.filter((s) => s.conflict_id === cid);
+    const wsAlerts = wsScoped.filter((s) => s.alert_severity !== "NORMAL");
+    const restAlerts = conflictSignalsRest.filter(
+      (s) => (s.alert_severity ?? "NORMAL") !== "NORMAL",
+    );
+    const pick = wsAlerts.length > 0 ? wsAlerts : restAlerts;
+    return pick.slice(0, 8);
+  }, [wsSignals, conflictSignalsRest, selected?.id]);
 
   // ── group signals by category for right panel ──────────────────────────────
   const categorised = useMemo(() => {

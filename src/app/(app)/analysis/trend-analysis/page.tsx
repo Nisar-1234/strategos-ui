@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { api, ApiTimeseriesBucket, ApiPrediction } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
@@ -37,6 +37,7 @@ function DataLabel({ x, y, value, suffix }: { x?: number; y?: number; value?: nu
 }
 
 interface TrendRow {
+  conflictId: string;
   prediction: string;
   direction: "up" | "down" | "flat";
   change: string;
@@ -68,10 +69,24 @@ export default function TrendAnalysisPage() {
   });
 
   const { data: predictions, live: predLive } = useApiData<ApiPrediction[]>({
-    fetcher: () => api.predictions({ limit: 10 }),
+    fetcher: () => api.predictions({ limit: 50 }),
     fallback: [],
     pollInterval: 60_000,
   });
+
+  /** Latest row per conflict (defensive if API ever returns duplicates). */
+  const predictionsDeduped = useMemo(() => {
+    const best = new Map<string, ApiPrediction>();
+    for (const p of predictions) {
+      const cur = best.get(p.conflict_id);
+      if (!cur || new Date(p.created_at) > new Date(cur.created_at)) {
+        best.set(p.conflict_id, p);
+      }
+    }
+    return Array.from(best.values()).sort(
+      (a, b) => b.convergence_score - a.convergence_score,
+    );
+  }, [predictions]);
 
   const live = tsLive || predLive;
 
@@ -104,12 +119,13 @@ export default function TrendAnalysisPage() {
     }, {})
   ).map((d) => ({ date: d.date, value: d.total > 0 ? Math.round((d.alerts / d.total) * 100) : 0 }));
 
-  const trendRows: TrendRow[] = predictions.map((p) => {
+  const trendRows: TrendRow[] = predictionsDeduped.map((p) => {
     const esc = p.escalation_prob;
     const neg = p.negotiation_prob;
     const direction: TrendRow["direction"] = esc > neg ? "up" : esc < neg ? "down" : "flat";
-    const change = `${esc > 0.5 ? "+" : ""}${(esc * 100).toFixed(1)}%`;
+    const change = `${(esc * 100).toFixed(1)}%`;
     return {
+      conflictId: p.conflict_id,
       prediction: p.conflict_name,
       direction,
       change,
@@ -259,7 +275,7 @@ export default function TrendAnalysisPage() {
                     <tr><td colSpan={5} className="px-4 py-6 text-center text-[12px] text-muted">No prediction data yet — waiting for computation workers...</td></tr>
                   )}
                   {trendRows.map((row) => (
-                    <tr key={row.prediction} className="border-b border-border last:border-b-0 hover:bg-surface transition-colors">
+                    <tr key={row.conflictId} className="border-b border-border last:border-b-0 hover:bg-surface transition-colors">
                       <td className="px-4 py-3 text-[12px] font-medium text-navy">{row.prediction}</td>
                       <td className="px-4 py-3"><DirectionIcon direction={row.direction} /></td>
                       <td className={cn(

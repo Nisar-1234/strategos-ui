@@ -183,6 +183,15 @@ export const api = {
 
   conflict: (id: string) => apiFetch<ApiConflict>(`/api/v1/conflicts/${id}`),
 
+  conflictSignals: (id: string, params?: { limit?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.limit != null) sp.set("limit", String(params.limit));
+    const qs = sp.toString();
+    return apiFetch<ApiSignal[]>(
+      `/api/v1/conflicts/${encodeURIComponent(id)}/signals${qs ? `?${qs}` : ""}`,
+    );
+  },
+
   conflictConvergence: (id: string, days = 30) =>
     apiFetch<{ conflict_id: string; scores: { timestamp: string; score: number }[] }>(
       `/api/v1/conflicts/${id}/convergence?days=${days}`,
