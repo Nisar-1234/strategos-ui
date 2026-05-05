@@ -249,7 +249,7 @@ export default function GameTheoryPage() {
           ) : conflictsLive ? (
             <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 text-[9px] font-bold">DATA READY</span>
           ) : (
-            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
+            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">POLLING</span>
           )}
         </div>
 
@@ -387,9 +387,9 @@ export default function GameTheoryPage() {
             <div className="bg-card border border-border rounded-lg p-5 flex flex-col items-center">
               <div className="relative w-[110px] h-[110px] mb-3">
                 <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                  <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#E2E8F0" strokeWidth="2.5" />
+                  <circle cx="18" cy="18" r="15.9155" fill="none" style={{ stroke: "var(--line-2)" }} strokeWidth="2.5" />
                   {confValue > 0 && (
-                    <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#1B4FD8" strokeWidth="2.5"
+                    <circle cx="18" cy="18" r="15.9155" fill="none" style={{ stroke: "var(--accent)" }} strokeWidth="2.5"
                       strokeDasharray={DASH} strokeDashoffset={confOffset} strokeLinecap="round" />
                   )}
                 </svg>

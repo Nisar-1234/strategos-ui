@@ -1,26 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
-import { cn } from "@/lib/utils";
-import {
-  EyeIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CalendarIcon,
-} from "@heroicons/react/24/outline";
-import { api, type ApiPrediction } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronDownIcon } from "@heroicons/react/24/outline";
+import { api, type ApiPrediction, type ApiSignal } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
-import { ExportButton } from "@/components/export/ExportButtonClient";
-import type { ExportPayload } from "@/lib/export/types";
-import { SnapshotButton } from "@/components/export/SnapshotButton";
+import { Tag } from "@/components/ui/tag";
+import { useTweaks } from "@/components/layout/tweaks-panel";
 
-/* All data from live API — no mock fallback */
-
-const confidenceBadge: Record<string, string> = {
-  HIGH: "bg-green-50 text-green-700 border border-green-200",
-  MEDIUM: "bg-amber-50 text-amber-700 border border-amber-200",
-  LOW: "bg-gray-100 text-gray-500 border border-gray-200",
-};
+/* ── helpers ── */
 
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -30,220 +18,725 @@ function timeAgo(isoDate: string): string {
   return `${Math.floor(mins / 1440)}d ago`;
 }
 
-function DonutChart({ segments }: { segments: { label: string; pct: number; color: string }[] }) {
-  const radius = 40;
-  const circumference = 2 * Math.PI * radius;
-  let offset = 0;
+/* ── FilterGroup ── */
 
+function FilterGroup({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { v: string; l: string }[];
+}) {
   return (
-    <div className="flex flex-col items-center gap-3">
-      <svg width="120" height="120" viewBox="0 0 100 100" className="rotate-[-90deg]">
-        {segments.map((seg) => {
-          const dashLen = (seg.pct / 100) * circumference;
-          const gapLen = circumference - dashLen;
-          const el = (
-            <circle key={seg.label} cx="50" cy="50" r={radius} fill="none" stroke={seg.color} strokeWidth="12" strokeDasharray={`${dashLen} ${gapLen}`} strokeDashoffset={-offset} strokeLinecap="round" />
-          );
-          offset += dashLen;
-          return el;
-        })}
-      </svg>
-      <div className="flex flex-col gap-1.5 w-full">
-        {segments.map((seg) => (
-          <div key={seg.label} className="flex items-center gap-2 text-[11px]">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
-            <span className="text-navy">{seg.label}</span>
-            <span className="ml-auto font-semibold text-navy">{seg.pct}%</span>
-          </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span
+        className="mono caps"
+        style={{ color: "var(--fg-4)", fontSize: 9.5 }}
+      >
+        {label}
+      </span>
+      <div
+        style={{
+          display: "inline-flex",
+          background: "var(--bg-inset)",
+          border: "1px solid var(--line-2)",
+          borderRadius: 2,
+          padding: 2,
+          gap: 1,
+        }}
+      >
+        {options.map((o) => (
+          <button
+            key={o.v}
+            onClick={() => onChange(o.v)}
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              background: value === o.v ? "var(--bg-3)" : "transparent",
+              color: value === o.v ? "var(--fg-1)" : "var(--fg-3)",
+              border: "none",
+              borderRadius: 1,
+              cursor: "pointer",
+            }}
+          >
+            {o.l}
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
+/* ── OutcomeBar ── */
+
+function OutcomeBar({
+  escalation,
+  stalemate,
+  negotiation,
+  resolution,
+}: {
+  escalation: number;
+  stalemate: number;
+  negotiation: number;
+  resolution: number;
+}) {
+  const parts = [
+    { label: "Esc", v: escalation,  c: "var(--sig-critical)" },
+    { label: "Stl", v: stalemate,   c: "var(--sig-warn)" },
+    { label: "Neg", v: negotiation, c: "var(--sig-info)" },
+    { label: "Res", v: resolution,  c: "var(--sig-positive)" },
+  ];
+  const total = parts.reduce((s, p) => s + p.v, 1e-9);
+  return (
+    <div style={{ minWidth: 200 }}>
+      <div
+        className="mono caps"
+        style={{
+          color: "var(--fg-4)",
+          fontSize: 9,
+          marginBottom: 4,
+          textAlign: "right",
+        }}
+      >
+        Outcome weighting
+      </div>
+      <div
+        style={{
+          display: "flex",
+          height: 18,
+          borderRadius: 1,
+          overflow: "hidden",
+          border: "1px solid var(--line-1)",
+        }}
+      >
+        {parts.map((p) => (
+          <div
+            key={p.label}
+            style={{
+              width: `${(p.v / total) * 100}%`,
+              background: p.c,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9.5,
+              color: "var(--bg-0)",
+              fontWeight: 600,
+            }}
+          >
+            {p.v / total >= 0.2 && Math.round(p.v * 100)}
+          </div>
+        ))}
+      </div>
+      <div
+        className="mono caps"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: 4,
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+        }}
+      >
+        {parts.map((p) => (
+          <span key={p.label}>{p.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── ScenarioCard ── */
+
+function ScenarioCard({
+  prediction,
+  expanded,
+  onToggle,
+  relatedSignals,
+}: {
+  prediction: ApiPrediction;
+  expanded: boolean;
+  onToggle: () => void;
+  relatedSignals: ApiSignal[];
+}) {
+  const router = useRouter();
+  const convergence = prediction.convergence_score / 10;
+  const bandLo = Math.max(0, convergence - 0.08);
+  const bandHi = Math.min(1, convergence + 0.06);
+  const toneColor =
+    convergence >= 0.8
+      ? "var(--sig-critical)"
+      : convergence >= 0.65
+      ? "var(--sig-warn)"
+      : "var(--accent)";
+
+  const confidenceTone =
+    prediction.confidence === "HIGH"
+      ? "critical"
+      : prediction.confidence === "MEDIUM"
+      ? "warn"
+      : ("info" as const);
+
+  return (
+    <div
+      style={{
+        background: "var(--bg-1)",
+        border: `1px solid ${expanded ? "var(--line-3)" : "var(--line-2)"}`,
+        borderLeft: `3px solid ${toneColor}`,
+        borderRadius: 3,
+        boxShadow: expanded ? "var(--shadow-1)" : "none",
+      }}
+    >
+      {/* Header row */}
+      <div
+        onClick={onToggle}
+        style={{
+          padding: "14px 18px",
+          cursor: "pointer",
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto auto",
+          gap: 18,
+          alignItems: "center",
+        }}
+      >
+        {/* Column 1: score + code */}
+        <div style={{ minWidth: 110 }}>
+          <div
+            className="mono"
+            style={{
+              fontSize: 10,
+              color: "var(--fg-4)",
+              letterSpacing: "0.1em",
+              marginBottom: 2,
+            }}
+          >
+            {prediction.conflict_name || "SCN-" + prediction.id.slice(-4)}
+          </div>
+          <div
+            className="mono"
+            style={{
+              fontSize: 28,
+              fontWeight: 500,
+              color: toneColor,
+              lineHeight: 1,
+            }}
+          >
+            {convergence.toFixed(2)}
+          </div>
+          <div
+            className="mono"
+            style={{ fontSize: 10, color: "var(--fg-3)", marginTop: 3 }}
+          >
+            band [{bandLo.toFixed(2)} · {bandHi.toFixed(2)}]
+          </div>
+        </div>
+
+        {/* Column 2: title + meta */}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 6,
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: 14,
+                fontWeight: 500,
+                color: "var(--fg-1)",
+              }}
+            >
+              {prediction.conflict_name || "Conflict scenario"}
+            </h3>
+            <Tag tone={confidenceTone}>
+              {prediction.confidence} conf.
+            </Tag>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 14,
+              fontSize: 11,
+              color: "var(--fg-3)",
+            }}
+          >
+            <span>{prediction.conflict_id || "Unknown"}</span>
+            <span>{timeAgo(prediction.created_at)}</span>
+          </div>
+        </div>
+
+        {/* Column 3: outcome weighting bar */}
+        <OutcomeBar
+          escalation={prediction.escalation_prob}
+          stalemate={prediction.stalemate_prob}
+          negotiation={prediction.negotiation_prob}
+          resolution={prediction.resolution_prob}
+        />
+
+        {/* Column 4: chevron */}
+        <ChevronDownIcon
+          style={{
+            width: 14,
+            height: 14,
+            color: "var(--fg-3)",
+            transform: expanded ? "rotate(180deg)" : "none",
+            transition: "transform .15s",
+            flexShrink: 0,
+          }}
+        />
+      </div>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div
+          style={{
+            borderTop: "1px solid var(--line-1)",
+            padding: "16px 18px",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 24,
+          }}
+        >
+          {/* Left: analyst summary + outcome probability bars */}
+          <div>
+            <div
+              className="mono caps"
+              style={{ color: "var(--fg-4)", marginBottom: 8 }}
+            >
+              Analyst summary
+            </div>
+            <p
+              style={{
+                margin: "0 0 14px",
+                fontSize: 13.5,
+                lineHeight: 1.6,
+                color: "var(--fg-1)",
+              }}
+            >
+              Convergence score {convergence.toFixed(2)} with{" "}
+              {prediction.confidence?.toLowerCase()} confidence. Escalation
+              probability {Math.round(prediction.escalation_prob * 100)}%,
+              stalemate {Math.round(prediction.stalemate_prob * 100)}%.
+            </p>
+
+            <div
+              className="mono caps"
+              style={{ color: "var(--fg-4)", marginBottom: 8 }}
+            >
+              Outcome probabilities
+            </div>
+            {[
+              {
+                label: "Escalation",
+                v: prediction.escalation_prob,
+                c: "var(--sig-critical)",
+              },
+              {
+                label: "Stalemate",
+                v: prediction.stalemate_prob,
+                c: "var(--sig-warn)",
+              },
+              {
+                label: "Negotiation",
+                v: prediction.negotiation_prob,
+                c: "var(--sig-info)",
+              },
+              {
+                label: "Resolution",
+                v: prediction.resolution_prob,
+                c: "var(--sig-positive)",
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "100px 1fr 44px",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 6,
+                }}
+              >
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: "var(--fg-3)" }}
+                >
+                  {item.label}
+                </span>
+                <div
+                  style={{
+                    height: 6,
+                    background: "var(--bg-inset)",
+                    borderRadius: 1,
+                    overflow: "hidden",
+                    border: "1px solid var(--line-1)",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${item.v * 100}%`,
+                      height: "100%",
+                      background: item.c,
+                    }}
+                  />
+                </div>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: "var(--fg-2)" }}
+                >
+                  {(item.v * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Right: actions + related signals */}
+          <div>
+            <div
+              className="mono caps"
+              style={{ color: "var(--fg-4)", marginBottom: 8 }}
+            >
+              Actions
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button
+                onClick={() =>
+                  router.push(
+                    `/analysis/ai-chat?scenario=${encodeURIComponent(prediction.conflict_name || prediction.conflict_id)}`
+                  )
+                }
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  background: "transparent",
+                  border: "1px solid var(--line-3)",
+                  color: "var(--accent)",
+                  fontSize: 10.5,
+                  cursor: "pointer",
+                  borderRadius: 2,
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Open in AI Chat
+              </button>
+              <button
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  background: "transparent",
+                  border: "1px solid var(--line-2)",
+                  color: "var(--fg-2)",
+                  fontSize: 10.5,
+                  cursor: "pointer",
+                  borderRadius: 2,
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Export note
+              </button>
+            </div>
+
+            {relatedSignals.length > 0 && (
+              <>
+                <div
+                  className="mono caps"
+                  style={{ color: "var(--fg-4)", marginBottom: 8 }}
+                >
+                  Related signals
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {relatedSignals.map((sig) => (
+                    <div
+                      key={sig.id}
+                      style={{
+                        padding: "7px 10px",
+                        background: "var(--bg-inset)",
+                        border: "1px solid var(--line-1)",
+                        borderRadius: 2,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          marginBottom: 3,
+                        }}
+                      >
+                        <span
+                          className="mono"
+                          style={{ fontSize: 10, color: "var(--accent)" }}
+                        >
+                          {sig.layer}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{ fontSize: 10, color: "var(--fg-4)" }}
+                        >
+                          {timeAgo(sig.timestamp)}
+                        </span>
+                      </div>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: 11.5,
+                          color: "var(--fg-2)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {sig.content || sig.source_name}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Page ── */
+
 export default function PredictionsPage() {
-  const { data: predictions, live } = useApiData({
+  const [tweaks] = useTweaks();
+  const { data: predictions, live } = useApiData<ApiPrediction[]>({
     fetcher: () => api.predictions({ limit: 50 }),
-    fallback: [] as ApiPrediction[],
+    fallback: [],
     pollInterval: 60_000,
   });
 
-  const rows = useMemo(() => predictions.map((p) => {
-    const maxProb = Math.max(p.escalation_prob, p.negotiation_prob, p.stalemate_prob, p.resolution_prob);
-    return {
-      ...p,
-      probability: Math.round(maxProb * 100),
-      status: p.escalation_prob > 0.5 ? "Active" : "Monitoring",
-      updated: timeAgo(p.created_at),
-    };
-  }), [predictions]);
+  const { data: signals } = useApiData<ApiSignal[]>({
+    fetcher: () => api.signals({ limit: 200 }),
+    fallback: [],
+    pollInterval: 30_000,
+  });
 
-  const stats = useMemo(() => {
-    const high = predictions.filter((p) => p.confidence === "HIGH").length;
-    const med = predictions.filter((p) => p.confidence === "MEDIUM").length;
-    const low = predictions.filter((p) => p.confidence === "LOW").length;
-    return [
-      { label: "Total Predictions", value: predictions.length },
-      { label: "High Confidence", value: high, accent: "text-blue-600" },
-      { label: "Medium Confidence", value: med },
-      { label: "Low Confidence", value: low },
-    ];
+  const [region, setRegion] = useState("all");
+  const [confidence, setConfidence] = useState("all");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Auto-expand first prediction when data loads
+  useEffect(() => {
+    if (predictions.length > 0 && !expandedId) {
+      setExpandedId(predictions[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [predictions]);
 
-  const donutSegments = useMemo(() => {
-    const total = predictions.length || 1;
-    const high = predictions.filter((p) => p.confidence === "HIGH").length;
-    const med = predictions.filter((p) => p.confidence === "MEDIUM").length;
-    const low = predictions.filter((p) => p.confidence === "LOW").length;
-    return [
-      { label: "High Confidence", pct: Math.round((high / total) * 100), color: "#059669" },
-      { label: "Medium Confidence", pct: Math.round((med / total) * 100), color: "#D97706" },
-      { label: "Low Confidence", pct: Math.round((low / total) * 100), color: "#94A3B8" },
-    ];
-  }, [predictions]);
-
-  const exportPayload: ExportPayload = useMemo(() => ({
-    title: "Conflict Predictions",
-    subtitle: "STRATEGOS Intelligence Platform",
-    generated: new Date().toUTCString(),
-    stats: stats.map((s) => ({ label: s.label, value: s.value })),
-    tables: [{
-      title: "All Predictions",
-      headers: ["Conflict", "Confidence", "Status", "Escalation %", "Negotiation %", "Stalemate %", "Resolution %", "Convergence Score", "Last Updated"],
-      rows: rows.map((p) => [
-        p.conflict_name,
-        p.confidence,
-        p.status,
-        `${Math.round(p.escalation_prob * 100)}%`,
-        `${Math.round(p.negotiation_prob * 100)}%`,
-        `${Math.round(p.stalemate_prob * 100)}%`,
-        `${Math.round(p.resolution_prob * 100)}%`,
-        p.convergence_score.toFixed(2),
-        p.updated,
-      ]),
-    }],
-  }), [rows, stats]);
+  const filtered = predictions.filter((p) => {
+    const name = (p.conflict_name || "").toLowerCase();
+    if (region !== "all" && !name.includes(region)) return false;
+    if (confidence !== "all" && p.confidence !== confidence) return false;
+    if ((p.convergence_score ?? 0) / 10 < tweaks.convergenceThreshold - 0.2) return false;
+    return true;
+  });
 
   return (
-    <div className="flex-1 flex flex-col overflow-auto">
-      <div className="px-6 pt-5 pb-3 flex items-center justify-between">
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      {/* Page header */}
+      <div
+        style={{
+          padding: "20px 20px 12px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexShrink: 0,
+          borderBottom: "1px solid var(--line-1)",
+        }}
+      >
         <div>
-          <h1 className="text-[22px] font-bold text-navy leading-tight">Predictions</h1>
-          <p className="text-[12px] text-muted mt-0.5">Home / Predictions / Overview</p>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: 18,
+              fontWeight: 600,
+              color: "var(--fg-1)",
+              lineHeight: 1.2,
+            }}
+          >
+            Predictions
+          </h1>
+          <p
+            className="mono"
+            style={{ margin: "3px 0 0", fontSize: 10, color: "var(--fg-4)" }}
+          >
+            Home / Predictions / Scenarios
+          </p>
         </div>
         {live ? (
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "3px 8px",
+              background: "rgba(74,157,107,0.12)",
+              border: "1px solid rgba(74,157,107,0.3)",
+              borderRadius: 2,
+              fontSize: 9,
+              fontFamily: "var(--font-mono)",
+              fontWeight: 700,
+              letterSpacing: "0.12em",
+              color: "var(--sig-positive)",
+              textTransform: "uppercase",
+            }}
+          >
+            <span
+              className="live-dot"
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: "var(--sig-positive)",
+                display: "inline-block",
+              }}
+            />
+            Live
           </span>
         ) : (
-          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
+          <span
+            style={{
+              padding: "3px 8px",
+              background: "rgba(216,161,58,0.12)",
+              border: "1px solid rgba(216,161,58,0.3)",
+              borderRadius: 2,
+              fontSize: 9,
+              fontFamily: "var(--font-mono)",
+              fontWeight: 700,
+              letterSpacing: "0.12em",
+              color: "var(--sig-warn)",
+              textTransform: "uppercase",
+            }}
+          >
+            Polling
+          </span>
         )}
       </div>
 
-      <div className="px-6 pb-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <select className="border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy bg-card appearance-none pr-7 cursor-pointer">
-            <option>All Regions</option>
-          </select>
-          <select className="border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy bg-card appearance-none pr-7 cursor-pointer">
-            <option>All Confidence</option>
-            <option>HIGH</option>
-            <option>MEDIUM</option>
-            <option>LOW</option>
-          </select>
-          <select className="border border-border rounded-md px-2.5 py-1.5 text-[11px] text-navy bg-card appearance-none pr-7 cursor-pointer">
-            <option>All Statuses</option>
-          </select>
-          <button className="border border-border rounded-md p-1.5 text-muted hover:text-navy transition-colors">
-            <CalendarIcon className="w-4 h-4" />
-          </button>
-          <div className="ml-auto flex items-center gap-2">
-            <SnapshotButton filename={`STRATEGOS_predictions_${new Date().toISOString().slice(0,10)}.png`} />
-            <ExportButton payload={exportPayload} />
-          </div>
-        </div>
+      {/* Filter bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          padding: "10px 20px",
+          borderBottom: "1px solid var(--line-1)",
+          flexShrink: 0,
+          flexWrap: "wrap",
+        }}
+      >
+        <FilterGroup
+          label="Region"
+          value={region}
+          onChange={setRegion}
+          options={[
+            { v: "all", l: "All" },
+            { v: "gulf", l: "Persian Gulf" },
+            { v: "red sea", l: "Red Sea" },
+            { v: "iran", l: "Iran" },
+          ]}
+        />
+        <FilterGroup
+          label="Confidence"
+          value={confidence}
+          onChange={setConfidence}
+          options={[
+            { v: "all", l: "All" },
+            { v: "HIGH", l: "High" },
+            { v: "MEDIUM", l: "Medium" },
+            { v: "LOW", l: "Low" },
+          ]}
+        />
+        <span style={{ flex: 1 }} />
+        <span
+          className="mono"
+          style={{ color: "var(--fg-3)", fontSize: 11 }}
+        >
+          {filtered.length} of {predictions.length} · threshold {tweaks.convergenceThreshold.toFixed(2)}
+        </span>
+        <button
+          style={{
+            padding: "6px 12px",
+            background: "transparent",
+            border: "1px solid var(--line-3)",
+            color: "var(--accent)",
+            borderRadius: 2,
+            fontSize: 10.5,
+            cursor: "pointer",
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+          }}
+        >
+          Export briefing
+        </button>
       </div>
 
-      <div className="flex-1 flex gap-4 px-6 pb-6 overflow-auto">
-        <div className="flex-1 min-w-0 flex flex-col">
-          <div className="bg-card border border-border rounded-lg overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-border">
-              <h2 className="text-[13px] font-semibold text-navy">All Predictions</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Prediction</th>
-                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Confidence</th>
-                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Status</th>
-                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Probability</th>
-                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Last Updated</th>
-                    <th className="text-left px-4 py-2.5 text-[9px] font-bold text-muted uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 && (
-                    <tr><td colSpan={6} className="px-4 py-12 text-center text-[12px] text-muted">Waiting for prediction workers to generate data...</td></tr>
-                  )}
-                  {rows.map((p) => (
-                    <tr key={p.id} className="border-b border-border last:border-b-0 hover:bg-surface transition-colors">
-                      <td className="px-4 py-3 text-[12px] font-medium text-navy">{p.conflict_name}</td>
-                      <td className="px-4 py-3">
-                        <span className={cn("px-2 py-0.5 rounded text-[9px] font-bold uppercase", confidenceBadge[p.confidence] || confidenceBadge.LOW)}>
-                          {p.confidence}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-[12px] text-muted">{p.status}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] font-semibold text-navy w-8">{p.probability}%</span>
-                          <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${p.probability}%` }} />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-[12px] text-muted">{p.updated}</td>
-                      <td className="px-4 py-3">
-                        <button className="text-muted hover:text-navy transition-colors">
-                          <EyeIcon className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center justify-center gap-3 px-4 py-3 border-t border-border">
-              <button className="p-1 rounded border border-border text-muted hover:text-navy transition-colors">
-                <ChevronLeftIcon className="w-3.5 h-3.5" />
-              </button>
-              <span className="text-[11px] text-muted">Page 1 of {Math.ceil(rows.length / 10) || 1}</span>
-              <button className="p-1 rounded border border-border text-muted hover:text-navy transition-colors">
-                <ChevronRightIcon className="w-3.5 h-3.5" />
-              </button>
-            </div>
+      {/* Scrollable card list */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "16px 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        {filtered.length === 0 ? (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "80px 20px",
+            }}
+          >
+            <span
+              className="mono"
+              style={{ fontSize: 12, color: "var(--fg-4)" }}
+            >
+              Waiting for prediction workers...
+            </span>
           </div>
-        </div>
-
-        <div className="w-[280px] shrink-0 flex flex-col gap-4">
-          <div className="bg-card border border-border rounded-lg p-4">
-            <h3 className="text-[13px] font-semibold text-navy mb-3">Prediction Statistics</h3>
-            <div className="grid grid-cols-2 gap-2.5">
-              {stats.map((s) => (
-                <div key={s.label} className="bg-surface rounded-md p-3 text-center">
-                  <div className={cn("text-[22px] font-bold leading-none", s.accent || "text-navy")}>{s.value}</div>
-                  <div className="text-[9px] text-muted uppercase tracking-wider mt-1">{s.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-card border border-border rounded-lg p-4">
-            <h3 className="text-[13px] font-semibold text-navy mb-4">Confidence Breakdown</h3>
-            <DonutChart segments={donutSegments} />
-          </div>
-        </div>
+        ) : (
+          filtered.map((p) => (
+            <ScenarioCard
+              key={p.id}
+              prediction={p}
+              expanded={expandedId === p.id}
+              onToggle={() =>
+                setExpandedId(expandedId === p.id ? null : p.id)
+              }
+              relatedSignals={signals
+                .filter((s) => s.conflict_id === p.conflict_id)
+                .slice(0, 4)}
+            />
+          ))
+        )}
       </div>
     </div>
   );

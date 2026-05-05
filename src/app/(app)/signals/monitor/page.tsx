@@ -38,25 +38,23 @@ const defaultKeywords = ["ceasefire", "escalation", "sanctions", "NATO", "milita
 function DonutChart({ data }: { data: { label: string; pct: number; color: string }[] }) {
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
-  let accumulated = 0;
+  const arcs = data.map((slice, i) => {
+    const cumPct = data.slice(0, i).reduce((s, p) => s + p.pct, 0);
+    const dash = (slice.pct / 100) * circumference;
+    return { ...slice, dash, gap: circumference - dash, offset: -((cumPct / 100) * circumference) };
+  });
 
   return (
     <svg viewBox="0 0 140 140" className="w-[120px] h-[120px] mx-auto">
-      {data.map((slice) => {
-        const dash = (slice.pct / 100) * circumference;
-        const gap = circumference - dash;
-        const offset = -((accumulated / 100) * circumference);
-        accumulated += slice.pct;
-        return (
-          <circle
-            key={slice.label}
-            cx="70" cy="70" r={radius}
-            fill="none" stroke={slice.color} strokeWidth="20"
-            strokeDasharray={`${dash} ${gap}`} strokeDashoffset={offset}
-            transform="rotate(-90 70 70)"
-          />
-        );
-      })}
+      {arcs.map((arc) => (
+        <circle
+          key={arc.label}
+          cx="70" cy="70" r={radius}
+          fill="none" stroke={arc.color} strokeWidth="20"
+          strokeDasharray={`${arc.dash} ${arc.gap}`} strokeDashoffset={arc.offset}
+          transform="rotate(-90 70 70)"
+        />
+      ))}
       <text x="70" y="66" textAnchor="middle" className="fill-navy text-[14px] font-bold">100%</text>
       <text x="70" y="82" textAnchor="middle" className="fill-muted text-[9px]">Total</text>
     </svg>
@@ -208,7 +206,7 @@ export default function SignalMonitorPage() {
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
             </span>
           ) : (
-            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
+            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">POLLING</span>
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">

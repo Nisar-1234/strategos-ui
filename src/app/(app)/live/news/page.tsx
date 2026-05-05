@@ -66,18 +66,7 @@ export default function NewsLivePage() {
 
   return (
     <>
-      <Topbar title="Live News Channels" subtitle="Real-time broadcast monitoring and AI signal detection">
-        <div className="flex items-center gap-2">
-          {live ? (
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-500 text-white text-[9px] font-bold uppercase tracking-wider">
-              <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              Live
-            </div>
-          ) : (
-            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-600 text-[9px] font-bold">CONNECTING...</span>
-          )}
-        </div>
-      </Topbar>
+      <Topbar title="Live News Channels" subtitle="Real-time broadcast monitoring and AI signal detection" live={live} />
       <div className="flex-1 flex gap-4 p-4 overflow-hidden">
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center gap-2 mb-4">
@@ -116,7 +105,7 @@ export default function NewsLivePage() {
           <div className="grid grid-cols-2 gap-3 flex-1 min-h-0">
             {channels.length > 0 ? channels.map((ch) => (
               <div key={ch.name} className="bg-card border border-border rounded-lg overflow-hidden flex flex-col">
-                <div className="relative bg-navy-mid flex-1 min-h-[140px] flex items-center justify-center">
+                <div className="relative flex-1 min-h-[140px] flex items-center justify-center" style={{ background: "var(--bg-2)" }}>
                   {ch.live ? (
                     <>
                       <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500 text-white text-[9px] font-bold">
@@ -158,7 +147,7 @@ export default function NewsLivePage() {
         <div className="w-[260px] shrink-0 flex flex-col gap-4">
           <div className="bg-card border border-border rounded-lg p-4 flex-1 overflow-y-auto">
             <h3 className="text-[12px] font-semibold text-navy mb-1">AI Signal Detection</h3>
-            <p className="text-[9px] text-muted mb-3">{live ? "Live signals from L1 editorial layer" : "Connecting to signal feed..."}</p>
+            <p className="text-[9px] text-muted mb-3">{live ? "Live signals from L1 editorial layer" : "Polling signal feed..."}</p>
             <div className="space-y-3">
               {alertSignals.length > 0 ? alertSignals.map((s, i) => (
                 <div key={i} className="flex gap-2">

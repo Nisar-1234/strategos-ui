@@ -153,8 +153,10 @@ export default function SettingsPage() {
                     <div key={item.key} className="flex items-center justify-between">
                       <span className="text-[12px] text-navy">{item.label}</span>
                       <button onClick={() => setLocal(item.key, isOn ? "false" : "true")}
-                        className={cn("w-9 h-5 rounded-full relative transition-colors", isOn ? "bg-brand" : "bg-gray-300")}>
-                        <div className={cn("absolute top-[2px] w-[16px] h-[16px] bg-white rounded-full transition-all shadow-sm", isOn ? "right-[2px]" : "left-[2px]")} />
+                        className="w-9 h-5 rounded-full relative transition-colors"
+                        style={{ background: isOn ? "var(--accent)" : "var(--line-2)" }}>
+                        <div className={cn("absolute top-[2px] w-[16px] h-[16px] rounded-full transition-all shadow-sm", isOn ? "right-[2px]" : "left-[2px]")}
+                          style={{ background: "var(--fg-1)" }} />
                       </button>
                     </div>
                   );

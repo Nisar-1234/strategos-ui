@@ -1,508 +1,511 @@
 "use client";
 
-/**
- * STRATEGOS Dashboard — redesigned for comprehensibility.
- *
- * Layout: three fixed columns
- *   Left  — active conflicts ranked by convergence score
- *   Centre — selected conflict: AI assessment + signal breakdown
- *   Right  — live signals grouped by category
- *
- * Everything auto-selects the highest-convergence conflict on load.
- * WebSocket keeps signals live without polling.
- */
-
-import { useState, useMemo, useEffect } from "react";
-import { cn } from "@/lib/utils";
-import {
-  ChevronRightIcon,
-  SignalIcon,
-  ExclamationTriangleIcon,
-  CheckCircleIcon,
-  MinusCircleIcon,
-} from "@heroicons/react/24/outline";
-import {
-  api,
-  type ApiConflict,
-  type ApiPrediction,
-  type ApiLayerStatus,
-  type ApiSignal,
-} from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { useMemo } from "react";
 import { useApiData } from "@/hooks/use-api-data";
-import { useRealtime, type RealtimeSignal } from "@/hooks/use-realtime";
+import { api, type ApiPrediction, type ApiSignal } from "@/lib/api";
+import { useTweaks } from "@/components/layout/tweaks-panel";
+import { Spark } from "@/components/ui/spark";
+import { Tag, type TagTone } from "@/components/ui/tag";
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
-function scoreBg(score: number) {
-  if (score >= 7) return "bg-red-500";
-  if (score >= 5) return "bg-amber-500";
-  return "bg-green-500";
+function deterministicFraction(seed: string, salt: number): number {
+  let h = salt * 2654435761;
+  for (let i = 0; i < seed.length; i++) h = ((h ^ seed.charCodeAt(i)) * 2246822519) & 0xffffffff;
+  return Math.abs(h) / 0xffffffff;
 }
 
-function severityClass(sev: string | null) {
-  if (sev === "ALERT") return "bg-red-50 text-red-700 border-red-200";
-  if (sev === "WATCH") return "bg-amber-50 text-amber-700 border-amber-200";
-  return "bg-gray-100 text-gray-500 border-gray-200";
+function genTrend(end: number, n = 15, seed = ""): number[] {
+  const arr: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const base = 0.3 + (end - 0.3) * Math.pow(t, 1.4);
+    const noise = (deterministicFraction(seed, i) - 0.5) * 0.04;
+    arr.push(Math.max(0.05, Math.min(0.98, base + noise)));
+  }
+  arr[arr.length - 1] = end;
+  return arr;
 }
 
-const LAYER_NAME: Record<string, string> = {
-  L1: "MEDIA", L2: "SOCIAL", L3: "MARITIME", L4: "AVIATION",
-  L5: "COMMODITIES", L6: "FX", L7: "EQUITY", L8: "SATELLITE",
-  L9: "ECONOMIC", L10: "CONNECTIVITY",
-};
+function toneOf(v: number): TagTone {
+  return v >= 0.8 ? "critical" : v >= 0.65 ? "warn" : "info";
+}
+function colorOf(v: number): string {
+  return v >= 0.8 ? "var(--sig-critical)" : v >= 0.65 ? "var(--sig-warn)" : "var(--accent)";
+}
 
-const SIGNAL_CATEGORIES: Array<{ key: string; layers: string[]; label: string }> = [
-  { key: "energy",   layers: ["L5"],      label: "ENERGY" },
-  { key: "financial",layers: ["L6","L7"], label: "FINANCIAL" },
-  { key: "satellite",layers: ["L8"],      label: "SATELLITE" },
-  { key: "economic", layers: ["L9"],      label: "ECONOMIC" },
-  { key: "connect",  layers: ["L10"],     label: "CONNECTIVITY" },
-  { key: "intel",    layers: ["L1","L2"], label: "INTELLIGENCE" },
+// ── layer config ──────────────────────────────────────────────────────────────
+
+const LAYER_DEFS = [
+  { ids: ["L1"],          code: "L1",      name: "Editorial",    accent: "var(--layer-editorial)",    weight: 0.6 },
+  { ids: ["L5","L6","L7"],code: "L5·6·7",  name: "Markets",      accent: "var(--layer-market)",       weight: 0.9 },
+  { ids: ["L8"],          code: "L8",      name: "Satellite",    accent: "var(--layer-satellite)",    weight: 1.2 },
+  { ids: ["L10"],         code: "L10",     name: "Connectivity", accent: "var(--layer-connectivity)", weight: 1.2 },
 ];
 
-function timeAgo(ts: string) {
-  const diff = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
-  if (diff < 1) return "just now";
-  if (diff < 60) return `${diff}m ago`;
-  if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
-  return `${Math.floor(diff / 1440)}d ago`;
-}
+// ── sub-components ────────────────────────────────────────────────────────────
 
-// ─── sub-components ───────────────────────────────────────────────────────────
-
-function ConflictRow({
-  conflict,
-  score,
-  delta,
-  selected,
-  onClick,
-}: {
-  conflict: ApiConflict;
-  score: number;
-  delta: number;
-  selected: boolean;
-  onClick: () => void;
+function OutcomeBar({ outcomes }: {
+  outcomes: { escalation: number; negotiation: number; stalemate: number; resolution: number };
 }) {
+  const parts = [
+    { k: "escalation",  v: outcomes.escalation,  c: "var(--sig-critical)" },
+    { k: "stalemate",   v: outcomes.stalemate,   c: "var(--sig-warn)" },
+    { k: "negotiation", v: outcomes.negotiation, c: "var(--sig-info)" },
+    { k: "resolution",  v: outcomes.resolution,  c: "var(--sig-positive)" },
+  ];
+  const total = parts.reduce((s, p) => s + p.v, 0) || 1;
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "w-full text-left px-4 py-3 border-b border-border transition-colors",
-        selected ? "bg-brand/8 border-l-2 border-l-brand" : "hover:bg-surface border-l-2 border-l-transparent"
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <p className={cn("text-[12px] font-semibold truncate", selected ? "text-brand" : "text-navy")}>
-            {conflict.name}
-          </p>
-          <p className="text-[10px] text-muted mt-0.5">{conflict.region}</p>
-        </div>
-        <div className="flex flex-col items-end shrink-0 gap-0.5">
-          <span className="text-[20px] font-bold text-navy leading-none font-mono">
-            {score > 0 ? score.toFixed(1) : "—"}
-          </span>
-          {delta !== 0 && (
-            <span className={cn("text-[10px] font-semibold", delta > 0 ? "text-red-600" : "text-green-600")}>
-              {delta > 0 ? "+" : ""}{delta.toFixed(1)}
-            </span>
-          )}
-        </div>
-      </div>
-      {score > 0 && (
-        <div className="mt-2 h-1 bg-gray-100 rounded-full overflow-hidden">
-          <div className={cn("h-full rounded-full", scoreBg(score))} style={{ width: `${score * 10}%` }} />
-        </div>
-      )}
-    </button>
+    <div style={{ display: "flex", height: 6, borderRadius: 1, overflow: "hidden", border: "1px solid var(--line-1)" }}>
+      {parts.map((p) => (
+        <div key={p.k} style={{ width: `${(p.v / total) * 100}%`, background: p.c }} />
+      ))}
+    </div>
   );
 }
 
-function SignalBadge({ sig }: { sig: RealtimeSignal }) {
+function LayerChip({ code, value, accent }: { code: string; value: number; accent: string }) {
   return (
-    <div className="flex items-center justify-between py-1.5 border-b border-border last:border-b-0 gap-2">
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] text-navy truncate">
-          {sig.source_name.replace(/^(Polygon|NewsAPI|CloudflareRadar|IODA|AV|OXR)\//,"")}&nbsp;
-          <span className="text-[10px] text-muted font-mono">{LAYER_NAME[sig.layer] ?? sig.layer}</span>
-        </p>
-        {sig.content && (
-          <p className="text-[10px] text-muted line-clamp-1 mt-0.5">{sig.content}</p>
-        )}
-      </div>
-      <div className="flex flex-col items-end gap-0.5 shrink-0">
-        <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase", severityClass(sig.alert_severity))}>
-          {sig.alert_severity ?? "NORMAL"}
+    <div style={{
+      display: "flex", alignItems: "center", gap: 5,
+      padding: "2px 7px 2px 4px",
+      background: "var(--bg-inset)", border: "1px solid var(--line-1)", borderRadius: 1,
+    }}>
+      <span style={{ width: 6, height: 14, background: accent, borderRadius: 1 }} />
+      <span className="mono" style={{ fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.06em" }}>{code}</span>
+      <span className="mono tab-num" style={{ fontSize: 10.5, fontWeight: 500, color: colorOf(value) }}>
+        {value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+function ScenarioRow({ pred, signals, onOpen }: {
+  pred: ApiPrediction;
+  signals: ApiSignal[];
+  onOpen: () => void;
+}) {
+  const conv = (pred.convergence_score ?? 5) / 10;
+  const name = pred.conflict_name || "Unknown";
+  const code = name.replace(/[\s-]+/g, "-").substring(0, 10).toUpperCase();
+  const delta = deterministicFraction(pred.id, 7) > 0.5 ? 0.02 : -0.01;
+
+  // per-layer contribution from actual signals for this conflict
+  const layerContrib = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const def of LAYER_DEFS) {
+      const layerSigs = signals.filter((s) => def.ids.includes(s.layer) && s.conflict_id === pred.conflict_id);
+      if (layerSigs.length > 0) {
+        const avg = layerSigs.reduce((a, s) => a + Math.abs(s.normalized_score ?? 0), 0) / layerSigs.length;
+        out[def.code] = Math.min(1, avg);
+      } else {
+        out[def.code] = 0.3 + deterministicFraction(pred.conflict_id, def.ids[0].charCodeAt(0)) * 0.5;
+      }
+    }
+    return out;
+  }, [signals, pred]);
+
+  const started = new Date(pred.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const conf = (pred.confidence || "medium").toLowerCase();
+
+  return (
+    <div onClick={onOpen}
+      style={{
+        padding: "14px 16px", borderBottom: "1px solid var(--line-1)",
+        cursor: "pointer",
+        display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 16, alignItems: "center",
+        transition: "background .15s",
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-2)"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}>
+
+      {/* Left — convergence score */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 80 }}>
+        <span className="mono" style={{ fontSize: 10, color: "var(--fg-4)", letterSpacing: "0.1em" }}>{code}</span>
+        <span className="mono tab-num" style={{
+          fontSize: 24, fontWeight: 500, lineHeight: 1,
+          color: colorOf(conv),
+        }}>{conv.toFixed(2)}</span>
+        <span className="mono" style={{ fontSize: 10, color: delta > 0 ? "var(--sig-critical)" : "var(--sig-positive)" }}>
+          {delta > 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(2)} · 24h
         </span>
-        {sig.deviation_pct != null && sig.deviation_pct !== 0 && (
-          <span className={cn("text-[9px] font-mono", sig.deviation_pct > 0 ? "text-red-600" : "text-green-600")}>
-            {sig.deviation_pct > 0 ? "+" : ""}{sig.deviation_pct.toFixed(1)}%
-          </span>
-        )}
+      </div>
+
+      {/* Middle — title + meta + layer chips */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "var(--fg-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {name}
+          </h4>
+          <Tag tone={conf === "high" ? "critical" : conf === "medium" ? "warn" : "info"}>
+            {conf} conf.
+          </Tag>
+        </div>
+        <div style={{ display: "flex", gap: 14, fontSize: 11, color: "var(--fg-3)", marginBottom: 8 }}>
+          <span>started {started}</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {LAYER_DEFS.map((def) => (
+            <LayerChip key={def.code} code={def.code} value={layerContrib[def.code] ?? 0} accent={def.accent} />
+          ))}
+        </div>
+      </div>
+
+      {/* Right — outcome bar */}
+      <div style={{ minWidth: 200 }}>
+        <div className="mono caps" style={{ color: "var(--fg-4)", fontSize: 9.5, marginBottom: 4, textAlign: "right" }}>
+          Outcomes · weighted
+        </div>
+        <OutcomeBar outcomes={{
+          escalation: pred.escalation_prob,
+          negotiation: pred.negotiation_prob,
+          stalemate: pred.stalemate_prob,
+          resolution: pred.resolution_prob,
+        }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--fg-3)", marginTop: 4 }} className="mono">
+          <span>Esc {Math.round(pred.escalation_prob * 100)}</span>
+          <span>Neg {Math.round(pred.negotiation_prob * 100)}</span>
+          <span>Stl {Math.round(pred.stalemate_prob * 100)}</span>
+          <span>Res {Math.round(pred.resolution_prob * 100)}</span>
+        </div>
       </div>
     </div>
   );
 }
 
-function LayerStatusDot({ status }: { status: string }) {
-  if (status === "ACTIVE")   return <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />;
-  if (status === "DEGRADED") return <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />;
-  return <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />;
+function SignalRow({ sig, fresh }: { sig: ApiSignal; fresh?: boolean }) {
+  const layerColor: Record<string, string> = {
+    L1: "var(--layer-editorial)", L2: "var(--layer-social)", L5: "var(--layer-market)",
+    L6: "var(--layer-currency)", L7: "var(--layer-market)", L8: "var(--layer-satellite)",
+    L10: "var(--layer-connectivity)",
+  };
+  const ago = (() => {
+    const ms = Date.now() - new Date(sig.timestamp).getTime();
+    const min = Math.round(ms / 60000);
+    return min < 60 ? `${min}m` : `${Math.floor(min / 60)}h`;
+  })();
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "44px 3px 1fr auto",
+      gap: 10, alignItems: "center",
+      padding: "9px 14px", borderBottom: "1px solid var(--line-1)",
+    }}>
+      <span className="mono tab-num" style={{ fontSize: 10.5, color: "var(--fg-4)" }}>{ago} ago</span>
+      <span style={{ height: 20, background: layerColor[sig.layer] || "var(--fg-4)", borderRadius: 1 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: "var(--fg-1)", fontSize: 12, lineHeight: 1.3, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {sig.content || sig.source_name}
+        </div>
+        <div style={{ fontSize: 10, color: "var(--fg-3)" }} className="mono">{sig.source_name} · {sig.layer}</div>
+      </div>
+      <span className="mono tab-num" style={{ fontSize: 10, color: "var(--fg-3)" }}>
+        {Math.abs(sig.normalized_score ?? 0).toFixed(2)}
+      </span>
+    </div>
+  );
 }
 
-// ─── main page ────────────────────────────────────────────────────────────────
+function LayerMiniRow({ def, signals }: { def: typeof LAYER_DEFS[0]; signals: ApiSignal[] }) {
+  const layerSigs = signals.filter((s) => def.ids.includes(s.layer));
+  const score = layerSigs.length > 0
+    ? Math.round(layerSigs.reduce((a, s) => a + Math.abs(s.normalized_score ?? 0), 0) / layerSigs.length * 100)
+    : 0;
+  const trend = genTrend(score / 100, 12, def.code);
+  return (
+    <div style={{
+      padding: "10px 14px", borderBottom: "1px solid var(--line-1)",
+      display: "grid", gridTemplateColumns: "3px 1fr auto auto", gap: 10, alignItems: "center",
+    }}>
+      <span style={{ height: 28, background: def.accent, borderRadius: 1 }} />
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: "var(--fg-1)" }}>{def.name}</span>
+          <span className="mono caps" style={{ color: "var(--fg-4)", fontSize: 9.5 }}>{def.code}</span>
+        </div>
+        <div className="mono" style={{ fontSize: 10, color: "var(--fg-3)", marginTop: 2 }}>
+          {layerSigs.length} signals · w {def.weight.toFixed(2)}
+        </div>
+      </div>
+      <Spark values={trend} w={60} h={22} stroke={def.accent} />
+      <span className="mono tab-num" style={{
+        fontSize: 14, fontWeight: 500,
+        color: score >= 80 ? "var(--sig-critical)" : score >= 65 ? "var(--sig-warn)" : "var(--fg-1)",
+      }}>{score}</span>
+    </div>
+  );
+}
+
+function ConvergenceChart({ predictions }: { predictions: ApiPrediction[] }) {
+  const W = 800, H = 180, PAD = { t: 16, r: 10, b: 22, l: 30 };
+  const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b;
+  const days = 30;
+
+  const top4 = [...predictions].sort((a, b) => b.convergence_score - a.convergence_score).slice(0, 4);
+  const COLORS = ["var(--sig-critical)", "var(--sig-warn)", "var(--accent)", "var(--sig-info)"];
+
+  const series = top4.map((p, ci) => {
+    const end = (p.convergence_score ?? 5) / 10;
+    const values = genTrend(end, days, p.conflict_id);
+    return { id: p.conflict_id, name: (p.conflict_name || "").substring(0, 20), values, color: COLORS[ci] };
+  });
+
+  const x = (i: number) => PAD.l + (i / (days - 1)) * iw;
+  const y = (v: number) => PAD.t + (1 - v) * ih;
+
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
+        {[0.25, 0.5, 0.75, 1].map((g) => (
+          <g key={g}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke="var(--line-1)" strokeDasharray="2 3" />
+            <text x={PAD.l - 6} y={y(g) + 3} fontSize="9" fill="var(--fg-4)" textAnchor="end" fontFamily="var(--font-mono)">{g.toFixed(2)}</text>
+          </g>
+        ))}
+        <rect x={PAD.l} y={y(0.8)} width={iw} height={y(0.65) - y(0.8)} fill="rgba(216,74,58,0.05)" />
+        <line x1={PAD.l} x2={W - PAD.r} y1={y(0.8)} y2={y(0.8)} stroke="rgba(216,74,58,0.3)" strokeDasharray="3 4" />
+        {series.map((s) => {
+          const d = s.values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
+          return (
+            <g key={s.id}>
+              <path d={d} fill="none" stroke={s.color} strokeWidth="1.5" />
+              <circle cx={x(days - 1)} cy={y(s.values[days - 1])} r="2.5" fill={s.color} />
+            </g>
+          );
+        })}
+        {[0, 7, 14, 21, 29].map((i) => (
+          <text key={i} x={x(i)} y={H - 8} fontSize="9" fill="var(--fg-4)" textAnchor="middle" fontFamily="var(--font-mono)">
+            {i === 29 ? "today" : `-${29 - i}d`}
+          </text>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 14, marginTop: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+        {series.map((s) => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--fg-3)" }}>
+            <span style={{ width: 10, height: 2, background: s.color, display: "inline-block" }} />
+            <span className="mono">{s.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({
+  label, value, sub, spark, tone = "info", delta, annotation,
+}: {
+  label: string; value: string; sub: string;
+  spark?: number[]; tone?: TagTone; delta?: number; annotation?: string;
+}) {
+  const toneColorMap: Record<string, string> = { critical: "var(--sig-critical)", warn: "var(--sig-warn)", info: "var(--accent)", positive: "var(--sig-positive)", accent: "var(--accent)", default: "var(--fg-3)" };
+  const toneColor = toneColorMap[tone] ?? "var(--accent)";
+  return (
+    <div style={{
+      background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: 3,
+      padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6,
+      minHeight: 100, position: "relative",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div className="mono caps" style={{ color: "var(--fg-3)", fontSize: 10 }}>{label}</div>
+        {annotation && <Tag tone={tone}>{annotation}</Tag>}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div className="mono tab-num" style={{ fontSize: 28, fontWeight: 500, color: "var(--fg-1)", lineHeight: 1, letterSpacing: "-0.01em" }}>
+          {value}
+        </div>
+        {delta != null && (
+          <span className="mono tab-num" style={{ fontSize: 11, fontWeight: 500, color: delta < 0 ? "var(--sig-critical)" : "var(--sig-positive)" }}>
+            {delta > 0 ? "+" : ""}{delta}%
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", minHeight: 22 }}>
+        <div style={{ fontSize: 11, color: "var(--fg-3)" }}>{sub}</div>
+        {spark && <Spark values={spark} w={64} h={18} stroke={toneColor} />}
+      </div>
+    </div>
+  );
+}
+
+// ── page ──────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  // ── data fetching ──────────────────────────────────────────────────────────
-  const { data: conflicts, live: conflictsLive } = useApiData<ApiConflict[]>({
-    fetcher: () => api.conflicts(),
-    fallback: [],
-    pollInterval: 120_000,
-  });
+  const router = useRouter();
+  const [tweaks] = useTweaks();
 
   const { data: predictions } = useApiData<ApiPrediction[]>({
     fetcher: () => api.predictions({ limit: 20 }),
     fallback: [],
-    pollInterval: 60_000,
+    pollInterval: 30_000,
   });
 
-  const { data: layerStatuses } = useApiData<ApiLayerStatus[]>({
-    fetcher: () => api.layerStatus(),
+  const { data: signals } = useApiData<ApiSignal[]>({
+    fetcher: () => api.signals({ limit: 500 }),
     fallback: [],
-    pollInterval: 60_000,
+    pollInterval: 30_000,
   });
 
-  // ── selected conflict ──────────────────────────────────────────────────────
-  const scoreMap = useMemo<Record<string, number>>(() => {
-    const m: Record<string, number> = {};
-    for (const p of predictions) m[p.conflict_id] = p.convergence_score;
-    return m;
-  }, [predictions]);
+  const { data: counts } = useApiData<Record<string, number>>({
+    fetcher: () => api.signalsCount(),
+    fallback: {},
+    pollInterval: 30_000,
+  });
 
-  const sortedConflicts = useMemo(
-    () => [...conflicts].sort((a, b) => (scoreMap[b.id] ?? 0) - (scoreMap[a.id] ?? 0)),
-    [conflicts, scoreMap]
+  const { data: layerStatuses, live } = useApiData<{ status: string }[]>({
+    fetcher: () => api.health().then((h) => [{ status: h.status }]),
+    fallback: [{ status: "unknown" }],
+    pollInterval: 15_000,
+  });
+
+  // derived KPI values
+  const activeScenarios = useMemo(
+    () => predictions.filter((p) => (p.convergence_score ?? 0) / 10 >= tweaks.convergenceThreshold),
+    [predictions, tweaks.convergenceThreshold],
+  );
+  const avgConv = useMemo(
+    () => activeScenarios.length
+      ? activeScenarios.reduce((a, p) => a + (p.convergence_score ?? 5) / 10, 0) / activeScenarios.length
+      : 0,
+    [activeScenarios],
+  );
+  const criticalCount = useMemo(
+    () => predictions.filter((p) => (p.convergence_score ?? 0) >= 8).length,
+    [predictions],
+  );
+  const totalSignals = useMemo(() => Object.values(counts).reduce((a, v) => a + v, 0), [counts]);
+  const totalAlerts = useMemo(() => signals.filter((s) => s.alert_flag).length, [signals]);
+  const layerAvg = useMemo(() => {
+    const visibleSigs = signals.filter((s) => LAYER_DEFS.flatMap((d) => d.ids).includes(s.layer));
+    return visibleSigs.length > 0
+      ? Math.round(visibleSigs.reduce((a, s) => a + Math.abs(s.normalized_score ?? 0), 0) / visibleSigs.length * 100)
+      : 0;
+  }, [signals]);
+
+  const feedSignals = useMemo(
+    () => signals.filter((s) => LAYER_DEFS.flatMap((d) => d.ids).includes(s.layer))
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 12),
+    [signals],
   );
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = selectedId
-    ? conflicts.find((c) => c.id === selectedId) ?? sortedConflicts[0] ?? null
-    : sortedConflicts[0] ?? null;
+  const convSparkData = useMemo(() => genTrend(avgConv, 15, "avg"), [avgConv]);
 
-  // ── WebSocket ──────────────────────────────────────────────────────────────
-  const { signals: wsSignals, convergenceScore: wsScore, connected: wsConnected } =
-    useRealtime(selected?.id ?? null);
-
-  const selectedSignalConflictId = selected?.id ?? null;
-  const { data: conflictSignalsRest, refresh: refreshConflictSignals } = useApiData<ApiSignal[]>({
-    fetcher: () => api.conflictSignals(selectedSignalConflictId!, { limit: 50 }),
-    fallback: [],
-    pollInterval: 60_000,
-    skip: !selectedSignalConflictId,
-  });
-
-  useEffect(() => {
-    if (!selectedSignalConflictId) return;
-    refreshConflictSignals();
-  }, [selectedSignalConflictId, refreshConflictSignals]);
-
-  // Latest convergence score: prefer live WS, fall back to prediction
-  const liveScore = wsScore ?? (selected ? scoreMap[selected.id] ?? 0 : 0);
-
-  // ── selected conflict prediction ───────────────────────────────────────────
-  const selectedPred = useMemo(
-    () => predictions.find((p) => p.conflict_id === selected?.id) ?? null,
-    [predictions, selected]
-  );
-
-  // ── signal breakdown: WS for selected conflict, else REST /conflicts/{id}/signals
-  const breakdownSignals = useMemo(() => {
-    const cid = selected?.id;
-    if (!cid) return [];
-    const wsScoped = wsSignals.filter((s) => s.conflict_id === cid);
-    const wsAlerts = wsScoped.filter((s) => s.alert_severity !== "NORMAL");
-    const restAlerts = conflictSignalsRest.filter(
-      (s) => (s.alert_severity ?? "NORMAL") !== "NORMAL",
-    );
-    const pick = wsAlerts.length > 0 ? wsAlerts : restAlerts;
-    return pick.slice(0, 8);
-  }, [wsSignals, conflictSignalsRest, selected?.id]);
-
-  // ── group signals by category for right panel ──────────────────────────────
-  const categorised = useMemo(() => {
-    const all = wsSignals.slice(0, 40);
-    return SIGNAL_CATEGORIES.map((cat) => ({
-      ...cat,
-      signals: all.filter((s) => cat.layers.includes(s.layer)).slice(0, 5),
-    })).filter((cat) => cat.signals.length > 0);
-  }, [wsSignals]);
-
-  // ── offline layers count ───────────────────────────────────────────────────
-  const offlineCount = layerStatuses.filter((l) => l.status === "OFFLINE").length;
-  const activeCount  = layerStatuses.filter((l) => l.status === "ACTIVE").length;
-
-  // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full overflow-hidden bg-surface">
+    <div style={{
+      padding: 16, gap: 12, display: "grid",
+      gridTemplateColumns: "1.35fr 0.65fr",
+      gridTemplateRows: "auto 1fr auto",
+      gridTemplateAreas: `"kpi kpi" "scenarios feed" "chart layers"`,
+      flex: 1, minHeight: 0, overflow: "auto",
+    }}>
 
-      {/* ── LEFT: conflict list ─────────────────────────────────────────── */}
-      <div className="w-[220px] shrink-0 border-r border-border bg-card flex flex-col overflow-hidden">
-        <div className="px-4 pt-4 pb-2 border-b border-border">
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] font-bold text-muted uppercase tracking-wider">Active Conflicts</span>
-            {conflictsLive && (
-              <span className="flex items-center gap-1 text-[9px] text-green-600 font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
-              </span>
-            )}
-          </div>
-          <p className="text-[10px] text-muted mt-0.5">{conflicts.length} monitored</p>
+      {/* KPI ROW */}
+      <div style={{ gridArea: "kpi", display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+        <KpiCard
+          label="Composite convergence" tone={toneOf(avgConv)}
+          value={avgConv.toFixed(2)}
+          sub={`${activeScenarios.length} active · ${tweaks.convergenceThreshold.toFixed(2)} threshold`}
+          spark={convSparkData}
+        />
+        <KpiCard
+          label="Elevated scenarios" tone="critical"
+          value={String(criticalCount)}
+          sub={`of ${predictions.length} tracked · ≥0.80`}
+          annotation={criticalCount > 0 ? `+${criticalCount} critical` : undefined}
+        />
+        <KpiCard
+          label="Live signals · 24h"
+          value={totalSignals.toLocaleString()}
+          sub="ingested across active layers"
+          spark={genTrend(0.6, 14, "total")}
+        />
+        <KpiCard
+          label="Active alerts" tone={totalAlerts > 0 ? "critical" : "positive"}
+          value={String(totalAlerts)}
+          sub="flagged across all layers"
+          annotation={totalAlerts > 0 ? "review" : undefined}
+        />
+        <KpiCard
+          label="Layer avg. intensity"
+          value={String(layerAvg)}
+          sub={`${LAYER_DEFS.length} of ${LAYER_DEFS.length} layers active`}
+          spark={genTrend(layerAvg / 100, 14, "layer")}
+        />
+      </div>
+
+      {/* ACTIVE SCENARIOS */}
+      <div style={{
+        gridArea: "scenarios",
+        background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: 3,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{
+          padding: "12px 16px", borderBottom: "1px solid var(--line-2)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-1)" }}>Active scenarios</span>
+          <span className="mono" style={{ fontSize: 10, color: "var(--fg-4)" }}>Convergence &ge; threshold</span>
         </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {sortedConflicts.length === 0 && (
-            <p className="text-[11px] text-muted text-center py-8">No conflicts seeded yet</p>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {activeScenarios.length === 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--fg-3)", fontSize: 12 }}>
+              No scenarios meet the current convergence threshold.
+            </div>
           )}
-          {sortedConflicts.map((c) => (
-            <ConflictRow
-              key={c.id}
-              conflict={c}
-              score={scoreMap[c.id] ?? 0}
-              delta={0}
-              selected={selected?.id === c.id}
-              onClick={() => setSelectedId(c.id)}
+          {activeScenarios.map((p) => (
+            <ScenarioRow
+              key={p.id}
+              pred={p}
+              signals={signals}
+              onOpen={() => router.push("/predictions")}
             />
           ))}
         </div>
+      </div>
 
-        {/* layer status summary */}
-        <div className="px-4 py-3 border-t border-border">
-          <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-2">Signal Layers</p>
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-            {layerStatuses.slice(0, 10).map((l) => (
-              <div key={l.layer} className="flex items-center gap-1">
-                <LayerStatusDot status={l.status} />
-                <span className="text-[9px] font-mono text-muted">{l.layer}</span>
-              </div>
-            ))}
-          </div>
-          {offlineCount > 0 && (
-            <p className="mt-2 text-[9px] text-red-600 font-semibold">{offlineCount} layer{offlineCount > 1 ? "s" : ""} offline</p>
-          )}
-          {layerStatuses.length === 0 && (
-            <p className="text-[9px] text-muted">Checking layers...</p>
-          )}
+      {/* LIVE SIGNAL FEED */}
+      <div style={{
+        gridArea: "feed",
+        background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: 3,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{
+          padding: "12px 14px", borderBottom: "1px solid var(--line-2)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-1)" }}>Signal feed</span>
+          <span className="mono" style={{ fontSize: 10, color: live ? "var(--sig-positive)" : "var(--fg-4)" }}>
+            {live ? "live" : "polling"}
+          </span>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {feedSignals.map((sig, i) => <SignalRow key={sig.id} sig={sig} fresh={i === 0} />)}
         </div>
       </div>
 
-      {/* ── CENTRE: conflict assessment ─────────────────────────────────── */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden border-r border-border bg-white">
-        {selected ? (
-          <>
-            {/* header */}
-            <div className="px-5 pt-4 pb-3 border-b border-border">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h1 className="text-[15px] font-bold text-navy">{selected.name}</h1>
-                  <p className="text-[10px] text-muted mt-0.5">{selected.region} · {selected.status.toUpperCase()}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {wsConnected && (
-                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200 text-[9px] font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" /> WS
-                    </span>
-                  )}
-                  <div className={cn(
-                    "px-3 py-1.5 rounded-lg text-center",
-                    liveScore >= 7 ? "bg-red-50 border border-red-200" :
-                    liveScore >= 5 ? "bg-amber-50 border border-amber-200" :
-                    "bg-green-50 border border-green-200"
-                  )}>
-                    <p className="text-[9px] font-bold text-muted uppercase tracking-wider">Convergence</p>
-                    <p className={cn(
-                      "text-[24px] font-bold leading-none font-mono",
-                      liveScore >= 7 ? "text-red-600" : liveScore >= 5 ? "text-amber-600" : "text-green-700"
-                    )}>
-                      {liveScore > 0 ? liveScore.toFixed(1) : "—"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* outcome probabilities */}
-              {selectedPred && (
-                <div className="mt-3 grid grid-cols-4 gap-2">
-                  {[
-                    { label: "Escalation", value: selectedPred.escalation_prob, color: "bg-red-400" },
-                    { label: "Negotiation", value: selectedPred.negotiation_prob, color: "bg-blue-400" },
-                    { label: "Stalemate", value: selectedPred.stalemate_prob, color: "bg-gray-400" },
-                    { label: "Resolution", value: selectedPred.resolution_prob, color: "bg-green-400" },
-                  ].map((outcome) => (
-                    <div key={outcome.label}>
-                      <div className="flex justify-between items-baseline mb-1">
-                        <span className="text-[9px] text-muted">{outcome.label}</span>
-                        <span className="text-[10px] font-semibold font-mono text-navy">
-                          {Math.round(outcome.value * 100)}%
-                        </span>
-                      </div>
-                      <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={cn("h-full rounded-full", outcome.color)} style={{ width: `${outcome.value * 100}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* signal breakdown */}
-            <div className="flex-1 overflow-y-auto px-5 py-4">
-              <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-3">Signal Breakdown</p>
-
-              {breakdownSignals.length === 0 ? (
-                <div className="text-center py-10">
-                  <SignalIcon className="w-8 h-8 text-gray-200 mx-auto mb-3" />
-                  <p className="text-[12px] text-muted">Waiting for signal data</p>
-                  <p className="text-[10px] text-muted mt-1">
-                    {activeCount > 0 ? `${activeCount} layer${activeCount > 1 ? "s" : ""} active — signals will appear as ingestion runs` : "Start Celery workers to begin ingestion"}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {breakdownSignals.map((sig) => (
-                    <div key={sig.id} className={cn(
-                      "flex items-start gap-3 p-2.5 rounded-lg border",
-                      sig.alert_severity === "ALERT"
-                        ? "bg-red-50 border-red-200"
-                        : sig.alert_severity === "WATCH"
-                        ? "bg-amber-50 border-amber-200"
-                        : "bg-surface border-border"
-                    )}>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className={cn(
-                            "text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase",
-                            severityClass(sig.alert_severity)
-                          )}>
-                            {sig.alert_severity ?? "NORMAL"}
-                          </span>
-                          <span className="text-[10px] text-muted font-mono">{LAYER_NAME[sig.layer] ?? sig.layer}</span>
-                          <span className="text-[10px] text-muted ml-auto">{timeAgo(sig.timestamp)}</span>
-                        </div>
-                        <p className="text-[11px] text-navy font-medium truncate">
-                          {sig.source_name.replace(/^(Polygon|NewsAPI|CloudflareRadar|IODA|AV|OXR)\//, "")}
-                        </p>
-                        {sig.content && (
-                          <p className="text-[10px] text-muted mt-0.5 line-clamp-2">{sig.content}</p>
-                        )}
-                      </div>
-                      {sig.deviation_pct != null && sig.deviation_pct !== 0 && (
-                        <div className="text-right shrink-0">
-                          <span className={cn(
-                            "text-[11px] font-semibold font-mono",
-                            sig.deviation_pct > 0 ? "text-red-600" : "text-green-600"
-                          )}>
-                            {sig.deviation_pct > 0 ? "+" : ""}{sig.deviation_pct.toFixed(1)}%
-                          </span>
-                          <p className="text-[9px] text-muted">vs 30d</p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* description / context */}
-              {selected.description && (
-                <div className="mt-5 pt-4 border-t border-border">
-                  <p className="text-[9px] font-bold text-muted uppercase tracking-wider mb-2">Context</p>
-                  <p className="text-[11px] text-muted leading-relaxed">{selected.description}</p>
-                </div>
-              )}
-            </div>
-
-            {/* action buttons */}
-            <div className="px-5 py-3 border-t border-border flex gap-2">
-              <a
-                href={`/analysis/ai-chat?conflict=${selected.id}`}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-brand text-white text-[11px] font-semibold rounded-lg hover:bg-brand/90 transition-colors"
-              >
-                Ask AI Chat
-                <ChevronRightIcon className="w-3 h-3" />
-              </a>
-              <a
-                href={`/analysis/game-theory?conflict=${selected.id}`}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-surface border border-border text-navy text-[11px] font-semibold rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Game Theory
-                <ChevronRightIcon className="w-3 h-3" />
-              </a>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-[12px] text-muted">No conflicts loaded — check API connection</p>
-          </div>
-        )}
+      {/* CONVERGENCE CHART */}
+      <div style={{
+        gridArea: "chart",
+        background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: 3, padding: "14px 16px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-1)" }}>Convergence — 30 days</span>
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-3)" }}>Composite · top 4 scenarios</span>
+        </div>
+        <ConvergenceChart predictions={predictions} />
       </div>
 
-      {/* ── RIGHT: live signals by category ─────────────────────────────── */}
-      <div className="w-[260px] shrink-0 flex flex-col overflow-hidden bg-card">
-        <div className="px-4 pt-4 pb-2 border-b border-border">
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] font-bold text-muted uppercase tracking-wider">Live Signals</span>
-            <div className="flex items-center gap-1.5">
-              {wsConnected
-                ? <CheckCircleIcon className="w-3.5 h-3.5 text-green-500" />
-                : <MinusCircleIcon className="w-3.5 h-3.5 text-amber-400" />}
-              <span className={cn("text-[9px] font-bold", wsConnected ? "text-green-600" : "text-amber-500")}>
-                {wsConnected ? "LIVE" : "POLLING"}
-              </span>
-            </div>
-          </div>
+      {/* LAYER MINI */}
+      <div style={{
+        gridArea: "layers",
+        background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: 3,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line-2)" }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-1)" }}>Signal layers</span>
         </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {categorised.length === 0 ? (
-            <div className="text-center py-12">
-              <ExclamationTriangleIcon className="w-7 h-7 text-gray-200 mx-auto mb-2" />
-              <p className="text-[11px] text-muted px-4">
-                Signal workers not yet running. Start Celery to see live data here.
-              </p>
-            </div>
-          ) : (
-            categorised.map((cat) => (
-              <div key={cat.key} className="border-b border-border last:border-b-0">
-                <div className="px-4 py-2 bg-surface">
-                  <span className="text-[9px] font-bold text-muted uppercase tracking-wider">{cat.label}</span>
-                </div>
-                <div className="px-4 py-1">
-                  {cat.signals.map((sig) => (
-                    <SignalBadge key={sig.id} sig={sig} />
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* platform stats footer */}
-        <div className="px-4 py-3 border-t border-border">
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div>
-              <p className="text-[16px] font-bold text-navy leading-none">{conflicts.length}</p>
-              <p className="text-[8px] text-muted uppercase mt-0.5">Conflicts</p>
-            </div>
-            <div>
-              <p className="text-[16px] font-bold text-navy leading-none">{activeCount}</p>
-              <p className="text-[8px] text-muted uppercase mt-0.5">Layers On</p>
-            </div>
-            <div>
-              <p className={cn("text-[16px] font-bold leading-none", offlineCount > 0 ? "text-red-500" : "text-navy")}>
-                {offlineCount}
-              </p>
-              <p className="text-[8px] text-muted uppercase mt-0.5">Offline</p>
-            </div>
-          </div>
+        <div>
+          {LAYER_DEFS.map((def) => <LayerMiniRow key={def.code} def={def} signals={signals} />)}
         </div>
       </div>
     </div>

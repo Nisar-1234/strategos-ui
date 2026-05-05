@@ -202,15 +202,19 @@ export default function LlmSettingsPage() {
           <div className="flex-1">
             <label className="text-[11px] text-navy font-medium mb-1 block">Rate limiting</label>
             <button onClick={() => setRateLimiting(!rateLimiting)}
-              className={cn("w-9 h-5 rounded-full relative transition-colors", rateLimiting ? "bg-brand" : "bg-gray-300")}>
-              <div className={cn("absolute top-[2px] w-[16px] h-[16px] bg-white rounded-full transition-all shadow-sm", rateLimiting ? "right-[2px]" : "left-[2px]")} />
+              className="w-9 h-5 rounded-full relative transition-colors"
+              style={{ background: rateLimiting ? "var(--accent)" : "var(--line-2)" }}>
+              <div className={cn("absolute top-[2px] w-[16px] h-[16px] rounded-full transition-all shadow-sm", rateLimiting ? "right-[2px]" : "left-[2px]")}
+                style={{ background: "var(--fg-1)" }} />
             </button>
           </div>
           <div className="flex-1">
             <label className="text-[11px] text-navy font-medium mb-1 block">Caching</label>
             <button onClick={() => setCaching(!caching)}
-              className={cn("w-9 h-5 rounded-full relative transition-colors", caching ? "bg-brand" : "bg-gray-300")}>
-              <div className={cn("absolute top-[2px] w-[16px] h-[16px] bg-white rounded-full transition-all shadow-sm", caching ? "right-[2px]" : "left-[2px]")} />
+              className="w-9 h-5 rounded-full relative transition-colors"
+              style={{ background: caching ? "var(--accent)" : "var(--line-2)" }}>
+              <div className={cn("absolute top-[2px] w-[16px] h-[16px] rounded-full transition-all shadow-sm", caching ? "right-[2px]" : "left-[2px]")}
+                style={{ background: "var(--fg-1)" }} />
             </button>
           </div>
           <div className="flex items-center gap-2">

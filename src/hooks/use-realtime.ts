@@ -88,6 +88,7 @@ export function useRealtime(conflictId: string | null): UseRealtimeResult {
       // Exponential back-off: 1s, 2s, 4s, 8s, ... max 30s
       const delay = Math.min(BACKOFF_BASE_MS * 2 ** attemptRef.current, BACKOFF_MAX_MS);
       attemptRef.current += 1;
+      // eslint-disable-next-line react-hooks/purity, react-hooks/immutability
       timerRef.current = setTimeout(connect, delay);
     };
 

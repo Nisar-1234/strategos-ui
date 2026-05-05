@@ -2,103 +2,224 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
 import {
   Squares2X2Icon,
-  ChartBarIcon,
-  ChatBubbleLeftRightIcon,
-  SignalIcon,
   GlobeAltIcon,
-  NewspaperIcon,
+  ChatBubbleLeftRightIcon,
   CpuChipIcon,
-  CircleStackIcon,
-  KeyIcon,
-  SparklesIcon,
-  AcademicCapIcon,
-  ArrowTrendingUpIcon,
+  ChartBarIcon,
+  DocumentTextIcon,
 } from "@heroicons/react/24/outline";
 
-const navGroups = [
+const NAV_ITEMS = [
   {
-    label: "Main",
-    items: [
-      { name: "Dashboard", href: "/dashboard", icon: Squares2X2Icon },
-      { name: "Predictions", href: "/predictions", icon: ChartBarIcon },
-    ],
+    name: "Dashboard",
+    href: "/dashboard",
+    icon: Squares2X2Icon,
+    color: "#C8A26A",
+    bg: "rgba(200,162,106,0.18)",
   },
   {
-    label: "Analysis",
-    items: [
-      { name: "AI Chat", href: "/analysis/ai-chat", icon: ChatBubbleLeftRightIcon },
-      { name: "Game Theory", href: "/analysis/game-theory", icon: CpuChipIcon },
-      { name: "Trend Analysis", href: "/analysis/trend-analysis", icon: ArrowTrendingUpIcon },
-    ],
+    name: "Map",
+    href: "/live/map",
+    icon: GlobeAltIcon,
+    color: "#F59E0B",
+    bg: "rgba(245,158,11,0.18)",
   },
   {
-    label: "Signals",
-    items: [
-      { name: "Signals", href: "/signals/monitor", icon: SignalIcon },
-    ],
+    name: "AI Chat",
+    href: "/analysis/ai-chat",
+    icon: ChatBubbleLeftRightIcon,
+    color: "#8B5CF6",
+    bg: "rgba(139,92,246,0.18)",
   },
   {
-    label: "Live Feed",
-    items: [
-      { name: "Map", href: "/live/map", icon: GlobeAltIcon },
-      { name: "News", href: "/live/news", icon: NewspaperIcon },
-    ],
+    name: "Signal Command",
+    href: "/signals/command",
+    icon: CpuChipIcon,
+    color: "#14B8A6",
+    bg: "rgba(20,184,166,0.18)",
   },
   {
-    label: "Config",
-    items: [
-      { name: "Data Sources", href: "/config/data-sources", icon: CircleStackIcon },
-      { name: "API Keys", href: "/config/api-keys", icon: KeyIcon },
-      { name: "LLM Settings", href: "/config/llm-settings", icon: SparklesIcon },
-      { name: "Skills", href: "/config/skills", icon: AcademicCapIcon },
-    ],
+    name: "Predictions",
+    href: "/predictions",
+    icon: ChartBarIcon,
+    color: "#3B82F6",
+    bg: "rgba(59,130,246,0.18)",
+  },
+  {
+    name: "Source Registry",
+    href: "/config/source-registry",
+    icon: DocumentTextIcon,
+    color: "#94A3B8",
+    bg: "rgba(148,163,184,0.18)",
   },
 ];
+
+function StrategosMark({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <path
+        d="M10 1.5L17.5 5.5v5c0 5-3.5 7.5-7.5 8.5-4-1-7.5-3.5-7.5-8.5v-5z"
+        stroke="var(--accent)" strokeWidth="1.2"
+      />
+      <path
+        d="M10 5l3.5 2v3.5c0 2.5-1.75 3.5-3.5 4-1.75-.5-3.5-1.5-3.5-4V7z"
+        fill="var(--accent)" fillOpacity="0.3" stroke="var(--accent)" strokeWidth="1"
+      />
+      <circle cx="10" cy="9" r="1" fill="var(--accent)" />
+    </svg>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[220px] bg-navy overflow-y-auto z-50 flex flex-col">
-      <div className="px-5 pt-7 pb-6 border-b border-white/[0.07]">
-        <div className="text-[16px] font-bold text-white tracking-[0.04em]">
-          STRATEGOS
+    <aside
+      className="fixed left-0 top-0 bottom-0 z-50 flex flex-col"
+      style={{
+        width: 160,
+        background: "var(--bg-1)",
+        borderRight: "1px solid var(--line-2)",
+      }}
+    >
+      {/* Brand */}
+      <div
+        className="px-4 pt-5 pb-4"
+        style={{ borderBottom: "1px solid var(--line-1)" }}
+      >
+        <div className="flex items-center gap-2">
+          <StrategosMark size={16} />
+          <span
+            className="mono"
+            style={{
+              fontWeight: 600,
+              letterSpacing: "0.2em",
+              fontSize: 11,
+              color: "var(--fg-1)",
+            }}
+          >
+            STRATEGOS
+          </span>
         </div>
-        <div className="text-[10px] text-gray-700 uppercase tracking-[0.1em] mt-0.5">
-          Geopolitical Intelligence
+        <div
+          className="mono caps mt-1"
+          style={{ color: "var(--fg-4)", fontSize: 8.5, letterSpacing: "0.06em" }}
+        >
+          GCC Intelligence · V0.9 PILOT
         </div>
       </div>
 
+      {/* Workspaces */}
       <nav className="flex-1 py-3">
-        {navGroups.map((group) => (
-          <div key={group.label}>
-            <div className="px-5 pt-4 pb-1.5 text-[9px] font-bold text-gray-700 uppercase tracking-[0.12em]">
-              {group.label}
-            </div>
-            {group.items.map((item) => {
-              const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-2 px-5 py-[7px] text-[11.5px] border-l-2 transition-all duration-150",
-                    isActive
-                      ? "text-white bg-brand/25 border-l-brand-light"
-                      : "text-gray-500 border-l-transparent hover:text-white hover:border-l-brand-light hover:bg-white/[0.03]"
-                  )}
-                >
-                  <item.icon className={cn("w-3.5 h-3.5 shrink-0", isActive && "text-blue-400")} />
-                  {item.name}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+        <div
+          className="mono caps px-4 pb-2"
+          style={{ color: "var(--fg-4)", fontSize: 8.5, letterSpacing: "0.1em" }}
+        >
+          Workspaces
+        </div>
+
+        {NAV_ITEMS.map((item) => {
+          const isActive =
+            pathname === item.href || pathname?.startsWith(item.href + "/");
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex items-center gap-2.5 px-3 py-[6px] mx-2 rounded transition-all duration-150"
+              style={{
+                background: isActive ? "rgba(200,162,106,0.10)" : "transparent",
+                borderLeft: isActive
+                  ? "2px solid var(--accent)"
+                  : "2px solid transparent",
+                color: isActive ? "var(--fg-1)" : "var(--fg-3)",
+                fontWeight: isActive ? 500 : 400,
+                fontSize: 11.5,
+              }}
+            >
+              {/* Colored square badge */}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 22,
+                  height: 22,
+                  borderRadius: 4,
+                  background: isActive ? item.bg : "rgba(255,255,255,0.04)",
+                  flexShrink: 0,
+                  transition: "background 0.15s",
+                }}
+              >
+                <item.icon
+                  style={{
+                    width: 12,
+                    height: 12,
+                    color: isActive ? item.color : "var(--fg-4)",
+                  }}
+                />
+              </span>
+              {item.name}
+            </Link>
+          );
+        })}
       </nav>
+
+      {/* Footer */}
+      <div
+        className="px-4 py-3"
+        style={{ borderTop: "1px solid var(--line-1)" }}
+      >
+        <div className="flex items-center gap-1.5 mb-2">
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full"
+            style={{ background: "var(--sig-warn)" }}
+          />
+          <span
+            className="mono caps"
+            style={{ color: "var(--fg-3)", fontSize: 8, letterSpacing: "0.08em" }}
+          >
+            Pilot · Restricted
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, #4a5568 0%, #2d3748 100%)",
+              border: "1px solid var(--line-3)",
+              fontSize: 8,
+              fontWeight: 600,
+              color: "var(--fg-1)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            N
+          </div>
+          <div style={{ lineHeight: 1.3, minWidth: 0 }}>
+            <div style={{ color: "var(--fg-1)", fontSize: 10.5, fontWeight: 500 }}>
+              Analyst
+            </div>
+            <div
+              className="mono"
+              style={{
+                color: "var(--fg-4)",
+                fontSize: 8,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              Named User · 1 of 3
+            </div>
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }

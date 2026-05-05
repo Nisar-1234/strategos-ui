@@ -16,13 +16,11 @@ import {
   AreaChart,
 } from "recharts";
 import {
+  ArrowDownTrayIcon,
   ArrowTrendingUpIcon,
   ArrowTrendingDownIcon,
   ArrowRightIcon,
 } from "@heroicons/react/24/outline";
-import { ExportButton } from "@/components/export/ExportButtonClient";
-import type { ExportPayload } from "@/lib/export/types";
-import { SnapshotButton } from "@/components/export/SnapshotButton";
 
 const LAYER_COLORS: Record<string, string> = {
   L1: "#DC2626", L2: "#4F46E5", L3: "#0891B2", L4: "#0284C7",
@@ -147,30 +145,6 @@ export default function TrendAnalysisPage() {
   const uniqueLayers = new Set(timeseries.map((b) => b.layer)).size;
 
   const overallTrend = parseFloat(avgScore) < -0.1 ? "Escalatory" : parseFloat(avgScore) > 0.1 ? "De-escalatory" : "Mixed";
-  const exportPayload: ExportPayload = {
-    title: "Trend Analysis",
-    subtitle: `${days}-day window, ${bucket} buckets`,
-    generated: new Date().toUTCString(),
-    stats: [
-      { label: "Overall Trend", value: overallTrend },
-      { label: "Average Confidence", value: `${avgConf}%` },
-      { label: "Total Signals", value: totalSignals },
-      { label: "Alert Signals", value: totalAlerts },
-      { label: "Active Layers", value: `${uniqueLayers} / 10` },
-    ],
-    tables: [
-      {
-        title: "Conflict Escalation Trends",
-        headers: ["Conflict", "Trend", "Escalation %", "Confidence", "Last Updated"],
-        rows: trendRows.map((r) => [r.prediction, r.direction, r.change, r.confidence, r.updated]),
-      },
-      {
-        title: "Signal Volume by Date",
-        headers: ["Date", "Signal Count"],
-        rows: volumeByDate.map((d) => [d.date, d.count]),
-      },
-    ],
-  };
   const trendUp = overallTrend === "Escalatory";
 
   const trendStats = [
@@ -189,7 +163,7 @@ export default function TrendAnalysisPage() {
           "px-2 py-0.5 rounded text-[9px] font-bold tracking-wider",
           live ? "bg-green-500/10 text-green-600" : "bg-amber-500/10 text-amber-600",
         )}>
-          {live ? "LIVE DATA" : "CONNECTING..."}
+          {live ? "LIVE DATA" : "POLLING"}
         </span>
       </div>
 
@@ -215,10 +189,10 @@ export default function TrendAnalysisPage() {
             <option value="6h">6-Hour</option>
             <option value="1d">Daily</option>
           </select>
-          <div className="ml-auto flex items-center gap-2">
-            <SnapshotButton filename={`STRATEGOS_trends_${new Date().toISOString().slice(0,10)}.png`} />
-            <ExportButton payload={exportPayload} />
-          </div>
+          <button className="ml-auto flex items-center gap-1.5 bg-green-600 text-white rounded-lg px-3.5 py-1.5 text-[11px] font-medium hover:bg-green-700 transition-colors">
+            <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+            Export
+          </button>
         </div>
       </div>
 

@@ -49,7 +49,7 @@ export default function MarketsPage() {
 
   return (
     <>
-      <Topbar title="Markets" subtitle={`Commodities & equities with geopolitical overlay${lastUpdate ? ` -- Updated ${lastUpdate}` : ""}`} />
+      <Topbar title="Markets" subtitle={`Commodities & equities with geopolitical overlay${lastUpdate ? ` -- Updated ${lastUpdate}` : ""}`} live={commodities.length > 0 || equities.length > 0} />
       <div className="p-4 flex-1 overflow-y-auto flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -59,7 +59,7 @@ export default function MarketsPage() {
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> LIVE
               </span>
             ) : (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 font-bold">CONNECTING...</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 font-bold">POLLING</span>
             )}
           </div>
           <button

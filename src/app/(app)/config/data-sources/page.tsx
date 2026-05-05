@@ -91,15 +91,7 @@ export default function DataSourcesPage() {
 
   return (
     <>
-      <Topbar title="Data Sources" subtitle="All 10 signal layer ingestion pipelines">
-        {live ? (
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> API CONNECTED
-          </span>
-        ) : (
-          <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-bold">CONNECTING...</span>
-        )}
-      </Topbar>
+      <Topbar title="Data Sources" subtitle="All 10 signal layer ingestion pipelines" live={live} />
       <div className="flex-1 overflow-auto p-4">
         {/* Summary row */}
         <div className="grid grid-cols-3 gap-4 mb-6">

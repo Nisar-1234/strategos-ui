@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import React, { Fragment } from "react";
 import { cn } from "@/lib/utils";
 import type { gameTheorySummary } from "@/lib/mock-data";
 
@@ -26,14 +26,14 @@ export function GameTheoryMini({ data }: GameTheoryMiniProps) {
             {data.headers.cols.map((col) => (
               <div
                 key={col}
-                className="bg-navy rounded-[2px] p-1 text-[8px] text-center text-gray-400"
+                className="rounded-[2px] p-1 text-[8px] text-center" style={{ background: "var(--bg-inset)", color: "var(--fg-4)" } as React.CSSProperties}
               >
                 {col}
               </div>
             ))}
             {data.headers.rows.map((row, ri) => (
               <Fragment key={`row-${ri}`}>
-                <div className="bg-navy rounded-[2px] p-1 text-[8px] text-center text-gray-400">
+                <div className="rounded-[2px] p-1 text-[8px] text-center" style={{ background: "var(--bg-inset)", color: "var(--fg-4)" } as React.CSSProperties}>
                   {row}
                 </div>
                 {data.matrix[ri].map((cell, ci) => (
