@@ -244,7 +244,7 @@ export default function ApiKeysPage() {
                   <span className="text-[11px] font-medium text-navy">{layer}</span>
                   <span className={cn(
                     "text-[10px] font-semibold",
-                    status === "active" ? "text-green-600" : status === "stale" ? "text-amber-600" : "text-gray-400",
+                    status === "ACTIVE" ? "text-green-600" : status === "DEGRADED" ? "text-amber-600" : "text-gray-400",
                   )}>
                     {status}
                   </span>

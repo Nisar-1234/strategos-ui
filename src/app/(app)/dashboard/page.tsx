@@ -1,31 +1,44 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useApiData } from "@/hooks/use-api-data";
-import { api, type ApiPrediction, type ApiSignal } from "@/lib/api";
+import { api, type ApiPrediction, type ApiSignal, type ApiTimeseriesBucket } from "@/lib/api";
 import { useTweaks } from "@/components/layout/tweaks-panel";
 import { Spark } from "@/components/ui/spark";
 import { Tag, type TagTone } from "@/components/ui/tag";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function deterministicFraction(seed: string, salt: number): number {
-  let h = salt * 2654435761;
-  for (let i = 0; i < seed.length; i++) h = ((h ^ seed.charCodeAt(i)) * 2246822519) & 0xffffffff;
-  return Math.abs(h) / 0xffffffff;
+function clamp(v: number) { return Math.max(0, Math.min(1, v)); }
+
+function layerSpark(timeseries: ApiTimeseriesBucket[], layerIds: string[], n = 12): number[] {
+  const matching = timeseries.filter(b => layerIds.includes(b.layer));
+  if (!matching.length) return [];
+  const byDay = new Map<string, number[]>();
+  for (const b of matching) {
+    const d = b.timestamp.slice(0, 10);
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d)!.push(Math.abs(b.avg_score));
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-n)
+    .map(([, vals]) => clamp(vals.reduce((a, v) => a + v, 0) / vals.length));
 }
 
-function genTrend(end: number, n = 15, seed = ""): number[] {
-  const arr: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const t = i / (n - 1);
-    const base = 0.3 + (end - 0.3) * Math.pow(t, 1.4);
-    const noise = (deterministicFraction(seed, i) - 0.5) * 0.04;
-    arr.push(Math.max(0.05, Math.min(0.98, base + noise)));
+function overallSpark(timeseries: ApiTimeseriesBucket[], n = 15): number[] {
+  if (!timeseries.length) return [];
+  const byDay = new Map<string, number[]>();
+  for (const b of timeseries) {
+    const d = b.timestamp.slice(0, 10);
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d)!.push(Math.abs(b.avg_score));
   }
-  arr[arr.length - 1] = end;
-  return arr;
+  return [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-n)
+    .map(([, vals]) => clamp(vals.reduce((a, v) => a + v, 0) / vals.length));
 }
 
 function toneOf(v: number): TagTone {
@@ -81,33 +94,36 @@ function LayerChip({ code, value, accent }: { code: string; value: number; accen
   );
 }
 
-function ScenarioRow({ pred, signals, onOpen }: {
+function ScenarioRow({ pred, signals, histories, onOpen }: {
   pred: ApiPrediction;
   signals: ApiSignal[];
+  histories: Record<string, { timestamp: string; score: number }[]>;
   onOpen: () => void;
 }) {
   const conv = (pred.convergence_score ?? 5) / 10;
   const name = pred.conflict_name || "Unknown";
   const code = name.replace(/[\s-]+/g, "-").substring(0, 10).toUpperCase();
-  const delta = deterministicFraction(pred.id, 7) > 0.5 ? 0.02 : -0.01;
+
+  // Real 24h delta from convergence history
+  const hist = histories[pred.conflict_id] ?? [];
+  const delta = hist.length >= 2
+    ? Number(((hist[hist.length - 1].score - hist[hist.length - 2].score) / 10).toFixed(2))
+    : null;
 
   // per-layer contribution from actual signals for this conflict
   const layerContrib = useMemo(() => {
     const out: Record<string, number> = {};
     for (const def of LAYER_DEFS) {
       const layerSigs = signals.filter((s) => def.ids.includes(s.layer) && s.conflict_id === pred.conflict_id);
-      if (layerSigs.length > 0) {
-        const avg = layerSigs.reduce((a, s) => a + Math.abs(s.normalized_score ?? 0), 0) / layerSigs.length;
-        out[def.code] = Math.min(1, avg);
-      } else {
-        out[def.code] = 0.3 + deterministicFraction(pred.conflict_id, def.ids[0].charCodeAt(0)) * 0.5;
-      }
+      out[def.code] = layerSigs.length > 0
+        ? Math.min(1, layerSigs.reduce((a, s) => a + Math.abs(s.normalized_score ?? 0), 0) / layerSigs.length)
+        : 0;
     }
     return out;
   }, [signals, pred]);
 
   const started = new Date(pred.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-  const conf = (pred.confidence || "medium").toLowerCase();
+  const conf = (pred.confidence || "med").toLowerCase();
 
   return (
     <div onClick={onOpen}
@@ -127,9 +143,11 @@ function ScenarioRow({ pred, signals, onOpen }: {
           fontSize: 24, fontWeight: 500, lineHeight: 1,
           color: colorOf(conv),
         }}>{conv.toFixed(2)}</span>
-        <span className="mono" style={{ fontSize: 10, color: delta > 0 ? "var(--sig-critical)" : "var(--sig-positive)" }}>
-          {delta > 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(2)} · 24h
-        </span>
+        {delta !== null && (
+          <span className="mono" style={{ fontSize: 10, color: delta > 0 ? "var(--sig-critical)" : "var(--sig-positive)" }}>
+            {delta > 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(2)} · 24h
+          </span>
+        )}
       </div>
 
       {/* Middle — title + meta + layer chips */}
@@ -138,7 +156,7 @@ function ScenarioRow({ pred, signals, onOpen }: {
           <h4 style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "var(--fg-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {name}
           </h4>
-          <Tag tone={conf === "high" ? "critical" : conf === "medium" ? "warn" : "info"}>
+          <Tag tone={conf === "high" ? "critical" : conf === "med" ? "warn" : "info"}>
             {conf} conf.
           </Tag>
         </div>
@@ -206,12 +224,12 @@ function SignalRow({ sig, fresh }: { sig: ApiSignal; fresh?: boolean }) {
   );
 }
 
-function LayerMiniRow({ def, signals }: { def: typeof LAYER_DEFS[0]; signals: ApiSignal[] }) {
+function LayerMiniRow({ def, signals, timeseries }: { def: typeof LAYER_DEFS[0]; signals: ApiSignal[]; timeseries: ApiTimeseriesBucket[] }) {
   const layerSigs = signals.filter((s) => def.ids.includes(s.layer));
   const score = layerSigs.length > 0
     ? Math.round(layerSigs.reduce((a, s) => a + Math.abs(s.normalized_score ?? 0), 0) / layerSigs.length * 100)
     : 0;
-  const trend = genTrend(score / 100, 12, def.code);
+  const trend = layerSpark(timeseries, def.ids, 12);
   return (
     <div style={{
       padding: "10px 14px", borderBottom: "1px solid var(--line-1)",
@@ -236,7 +254,11 @@ function LayerMiniRow({ def, signals }: { def: typeof LAYER_DEFS[0]; signals: Ap
   );
 }
 
-function ConvergenceChart({ predictions }: { predictions: ApiPrediction[] }) {
+function ConvergenceChart({ predictions, histories, threshold }: {
+  predictions: ApiPrediction[];
+  histories: Record<string, { timestamp: string; score: number }[]>;
+  threshold: number;
+}) {
   const W = 800, H = 180, PAD = { t: 16, r: 10, b: 22, l: 30 };
   const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b;
   const days = 30;
@@ -245,8 +267,16 @@ function ConvergenceChart({ predictions }: { predictions: ApiPrediction[] }) {
   const COLORS = ["var(--sig-critical)", "var(--sig-warn)", "var(--accent)", "var(--sig-info)"];
 
   const series = top4.map((p, ci) => {
-    const end = (p.convergence_score ?? 5) / 10;
-    const values = genTrend(end, days, p.conflict_id);
+    const hist = histories[p.conflict_id] ?? [];
+    let values: number[];
+    if (hist.length >= 2) {
+      const raw = hist.map(h => clamp(h.score / 10));
+      while (raw.length < days) raw.unshift(raw[0]);
+      values = raw.slice(-days);
+    } else {
+      const flat = clamp((p.convergence_score ?? 5) / 10);
+      values = Array(days).fill(flat);
+    }
     return { id: p.conflict_id, name: (p.conflict_name || "").substring(0, 20), values, color: COLORS[ci] };
   });
 
@@ -262,8 +292,9 @@ function ConvergenceChart({ predictions }: { predictions: ApiPrediction[] }) {
             <text x={PAD.l - 6} y={y(g) + 3} fontSize="9" fill="var(--fg-4)" textAnchor="end" fontFamily="var(--font-mono)">{g.toFixed(2)}</text>
           </g>
         ))}
-        <rect x={PAD.l} y={y(0.8)} width={iw} height={y(0.65) - y(0.8)} fill="rgba(216,74,58,0.05)" />
-        <line x1={PAD.l} x2={W - PAD.r} y1={y(0.8)} y2={y(0.8)} stroke="rgba(216,74,58,0.3)" strokeDasharray="3 4" />
+        <rect x={PAD.l} y={y(threshold)} width={iw} height={y(Math.max(0, threshold - 0.15)) - y(threshold)} fill="rgba(216,74,58,0.05)" />
+        <line x1={PAD.l} x2={W - PAD.r} y1={y(threshold)} y2={y(threshold)} stroke="rgba(216,74,58,0.3)" strokeDasharray="3 4" />
+        <text x={W - PAD.r + 2} y={y(threshold) + 3} fontSize="8" fill="rgba(216,74,58,0.6)" fontFamily="var(--font-mono)">{threshold.toFixed(2)}</text>
         {series.map((s) => {
           const d = s.values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
           return (
@@ -332,6 +363,7 @@ function KpiCard({
 export default function DashboardPage() {
   const router = useRouter();
   const [tweaks] = useTweaks();
+  const [convergenceHistories, setConvergenceHistories] = useState<Record<string, { timestamp: string; score: number }[]>>({});
 
   const { data: predictions } = useApiData<ApiPrediction[]>({
     fetcher: () => api.predictions({ limit: 20 }),
@@ -356,6 +388,29 @@ export default function DashboardPage() {
     fallback: [{ status: "unknown" }],
     pollInterval: 15_000,
   });
+
+  const { data: timeseries } = useApiData<ApiTimeseriesBucket[]>({
+    fetcher: () => api.signalsTimeseries({ days: 14 }),
+    fallback: [],
+    pollInterval: 60_000,
+  });
+
+  // Fetch real convergence history for top 4 conflicts (chart + delta)
+  useEffect(() => {
+    const top4 = [...predictions].sort((a, b) => b.convergence_score - a.convergence_score).slice(0, 4);
+    if (!top4.length) return;
+    Promise.all(
+      top4.map(p =>
+        api.conflictConvergence(p.conflict_id, 30)
+          .then(r => ({ id: p.conflict_id, scores: r.scores }))
+          .catch(() => ({ id: p.conflict_id, scores: [] as { timestamp: string; score: number }[] }))
+      )
+    ).then(results => {
+      const map: Record<string, { timestamp: string; score: number }[]> = {};
+      results.forEach(r => { map[r.id] = r.scores; });
+      setConvergenceHistories(map);
+    });
+  }, [predictions]);
 
   // derived KPI values
   const activeScenarios = useMemo(
@@ -388,7 +443,9 @@ export default function DashboardPage() {
     [signals],
   );
 
-  const convSparkData = useMemo(() => genTrend(avgConv, 15, "avg"), [avgConv]);
+  const convSparkData = useMemo(() => overallSpark(timeseries, 15), [timeseries]);
+  const signalsSpark = useMemo(() => layerSpark(timeseries, ["L1","L5","L6","L7","L8","L10"], 14), [timeseries]);
+  const layerAvgSpark = useMemo(() => overallSpark(timeseries, 14), [timeseries]);
 
   return (
     <div style={{
@@ -417,7 +474,7 @@ export default function DashboardPage() {
           label="Live signals · 24h"
           value={totalSignals.toLocaleString()}
           sub="ingested across active layers"
-          spark={genTrend(0.6, 14, "total")}
+          spark={signalsSpark}
         />
         <KpiCard
           label="Active alerts" tone={totalAlerts > 0 ? "critical" : "positive"}
@@ -429,7 +486,7 @@ export default function DashboardPage() {
           label="Layer avg. intensity"
           value={String(layerAvg)}
           sub={`${LAYER_DEFS.length} of ${LAYER_DEFS.length} layers active`}
-          spark={genTrend(layerAvg / 100, 14, "layer")}
+          spark={layerAvgSpark}
         />
       </div>
 
@@ -457,6 +514,7 @@ export default function DashboardPage() {
               key={p.id}
               pred={p}
               signals={signals}
+              histories={convergenceHistories}
               onOpen={() => router.push("/predictions")}
             />
           ))}
@@ -492,7 +550,7 @@ export default function DashboardPage() {
           <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-1)" }}>Convergence — 30 days</span>
           <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-3)" }}>Composite · top 4 scenarios</span>
         </div>
-        <ConvergenceChart predictions={predictions} />
+        <ConvergenceChart predictions={predictions} histories={convergenceHistories} threshold={tweaks.convergenceThreshold} />
       </div>
 
       {/* LAYER MINI */}
@@ -505,7 +563,7 @@ export default function DashboardPage() {
           <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-1)" }}>Signal layers</span>
         </div>
         <div>
-          {LAYER_DEFS.map((def) => <LayerMiniRow key={def.code} def={def} signals={signals} />)}
+          {LAYER_DEFS.map((def) => <LayerMiniRow key={def.code} def={def} signals={signals} timeseries={timeseries} />)}
         </div>
       </div>
     </div>

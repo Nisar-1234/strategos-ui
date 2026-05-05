@@ -66,6 +66,7 @@ export default function TrendAnalysisPage() {
     fetcher: () => api.signalsTimeseries({ days, bucket }),
     fallback: [],
     pollInterval: 60_000,
+    deps: [days, bucket],
   });
 
   const { data: predictions, live: predLive } = useApiData<ApiPrediction[]>({

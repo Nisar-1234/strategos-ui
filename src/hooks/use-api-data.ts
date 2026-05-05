@@ -9,6 +9,8 @@ interface UseApiDataOptions<T> {
   pollInterval?: number;
   /** Skip initial fetch (useful when dependencies aren't ready). */
   skip?: boolean;
+  /** Extra values that trigger an immediate re-fetch when they change. */
+  deps?: unknown[];
 }
 
 interface UseApiDataResult<T> {
@@ -25,6 +27,7 @@ export function useApiData<T>({
   fallback,
   pollInterval = 30_000,
   skip = false,
+  deps,
 }: UseApiDataOptions<T>): UseApiDataResult<T> {
   const [data, setData] = useState<T>(fallback);
   const [loading, setLoading] = useState(!skip);
@@ -48,6 +51,11 @@ export function useApiData<T>({
     }
   }, []);
 
+  // Serialize deps to a stable string so the effect can react to value changes
+  // without requiring a fixed-length dependency array.
+  const depsKey = JSON.stringify(deps ?? []);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (skip) return;
     load();
@@ -55,7 +63,7 @@ export function useApiData<T>({
       const id = setInterval(load, pollInterval);
       return () => clearInterval(id);
     }
-  }, [load, pollInterval, skip]);
+  }, [load, pollInterval, skip, depsKey]);
 
   return { data, loading, live, error, refresh: load };
 }

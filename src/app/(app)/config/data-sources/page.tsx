@@ -73,7 +73,7 @@ export default function DataSourcesPage() {
   const connectedLayers = useMemo(() => {
     return LAYER_SOURCES.filter((ls) => {
       const hk = health.layers?.[ls.layer];
-      return hk && hk !== "no_data";
+      return hk && hk !== "NO_DATA";
     }).length;
   }, [health]);
 
@@ -82,8 +82,8 @@ export default function DataSourcesPage() {
       const count = layerCounts[ls.layer] || 0;
       const hk = health.layers?.[ls.layer];
       let status: "active" | "stale" | "pending" = "pending";
-      if (live && hk === "active") status = "active";
-      else if (live && hk === "stale") status = "stale";
+      if (live && hk === "ACTIVE") status = "active";
+      else if (live && hk === "DEGRADED") status = "stale";
       else if (live && count > 0) status = "active";
       return { ...ls, count, status };
     });
