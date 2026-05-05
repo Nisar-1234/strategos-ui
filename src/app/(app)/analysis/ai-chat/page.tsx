@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { PaperAirplaneIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { api, type ApiChatResponse, type ApiSignal } from "@/lib/api";
+import { api, type ApiChatResponse, type ApiSignal, type ApiConflict } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
 import { Tag } from "@/components/ui/tag";
 
@@ -61,7 +61,8 @@ function RichContent({
   const blocks = content.split(/\n\n+/);
 
   function renderInline(text: string) {
-    const parts = text.split(/(\[SIG-[A-Z0-9]+\])/g);
+    // Split on citations and bold spans
+    const parts = text.split(/(\[SIG-[A-Z0-9]+\]|\*\*[^*]+\*\*)/g);
     return parts.map((part, i) => {
       const citeMatch = part.match(/^\[SIG-([A-Z0-9]+)\]$/);
       if (citeMatch) {
@@ -90,6 +91,9 @@ function RichContent({
           </span>
         );
       }
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={i} style={{ fontWeight: 600, color: "var(--fg-1)" }}>{part.slice(2, -2)}</strong>;
+      }
       return <span key={i}>{part}</span>;
     });
   }
@@ -100,22 +104,101 @@ function RichContent({
         const trimmed = block.trim();
         if (!trimmed) return null;
 
-        // Header: ## or ### prefix
-        if (trimmed.startsWith("## ") || trimmed.startsWith("### ")) {
-          const text = trimmed.replace(/^#{2,3}\s+/, "");
+        // Horizontal rule
+        if (trimmed === "---" || trimmed === "***") {
+          return <hr key={bi} style={{ border: "none", borderTop: "1px solid var(--line-2)", margin: "4px 0" }} />;
+        }
+
+        // Headers: #, ##, ###
+        if (trimmed.match(/^#{1,3} /)) {
+          const level = (trimmed.match(/^#+/) || [""])[0].length;
+          const text = trimmed.replace(/^#+\s+/, "");
           return (
             <div
               key={bi}
               className="mono caps"
-              style={{ fontSize: 10.5, color: "var(--accent)", letterSpacing: "0.08em" }}
+              style={{
+                fontSize: level === 1 ? 12 : 10.5,
+                fontWeight: level === 1 ? 700 : 600,
+                color: "var(--accent)",
+                letterSpacing: "0.08em",
+              }}
             >
-              {text}
+              {renderInline(text)}
             </div>
           );
         }
 
-        // Bullet list
+        // Blockquote
         const lines = trimmed.split("\n");
+        const isBlockquote = lines.every((l) => l.startsWith("> "));
+        if (isBlockquote) {
+          return (
+            <div
+              key={bi}
+              style={{
+                borderLeft: "2px solid var(--accent-dim)",
+                paddingLeft: 10,
+                color: "var(--fg-2)",
+                fontSize: 11.5,
+                fontStyle: "italic",
+                lineHeight: 1.55,
+              }}
+            >
+              {lines.map((l, li) => (
+                <div key={li}>{renderInline(l.replace(/^> /, ""))}</div>
+              ))}
+            </div>
+          );
+        }
+
+        // Markdown table: lines that start and end with |
+        const isTable = lines.length >= 2 && lines.every((l) => l.trim().startsWith("|"));
+        if (isTable) {
+          const dataRows = lines.filter((l) => !l.match(/^\|[-| :]+\|$/));
+          const [headerRow, ...bodyRows] = dataRows;
+          const parseRow = (row: string) =>
+            row.split("|").map((c) => c.trim()).filter((_, i, a) => i > 0 && i < a.length - 1);
+          const headers = parseRow(headerRow || "");
+          return (
+            <table key={bi} style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead>
+                <tr>
+                  {headers.map((h, hi) => (
+                    <th
+                      key={hi}
+                      style={{
+                        textAlign: "left",
+                        padding: "4px 8px",
+                        borderBottom: "1px solid var(--line-2)",
+                        color: "var(--fg-3)",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 10,
+                        letterSpacing: "0.05em",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bodyRows.map((row, ri) => (
+                  <tr key={ri} style={{ borderBottom: "1px solid var(--line-1)" }}>
+                    {parseRow(row).map((cell, ci) => (
+                      <td key={ci} style={{ padding: "4px 8px", color: "var(--fg-1)", lineHeight: 1.5 }}>
+                        {renderInline(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        }
+
+        // Bullet list
         const isBulletBlock = lines.every((l) => l.match(/^[-*•]\s/));
         if (isBulletBlock) {
           return (
@@ -299,6 +382,20 @@ function AiChatInner() {
     pollInterval: 0,
   });
 
+  const { data: conflicts } = useApiData<ApiConflict[]>({
+    fetcher: () => api.conflicts(),
+    fallback: [],
+    pollInterval: 0,
+  });
+
+  const contextConflictId = useMemo(() => {
+    if (!incomingScenario) return null;
+    const match = conflicts.find(
+      (c) => c.id === incomingScenario || c.name === incomingScenario
+    );
+    return match?.id ?? null;
+  }, [conflicts, incomingScenario]);
+
   /* Derive evidence signals from most-recent assistant message sources */
   const evidenceSignals: ApiSignal[] = (() => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
@@ -333,7 +430,7 @@ function AiChatInner() {
     setLoading(true);
 
     try {
-      const resp: ApiChatResponse = await api.chat(text, undefined, sessionId || undefined);
+      const resp: ApiChatResponse = await api.chat(text, contextConflictId || undefined, sessionId || undefined);
       setSessionId(resp.session_id);
       setLive(true);
 
@@ -364,7 +461,7 @@ function AiChatInner() {
     } finally {
       setLoading(false);
     }
-  }, [input, loading, sessionId]);
+  }, [input, loading, sessionId, contextConflictId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -485,13 +582,19 @@ function AiChatInner() {
         >
           Context window
         </span>
-        {incomingScenario ? (
+        {conflicts.slice(0, 3).map((c) => {
+          const isActive =
+            incomingScenario != null &&
+            (c.id === incomingScenario || c.name === incomingScenario);
+          return (
+            <Tag key={c.id} tone={isActive ? "accent" : "default"}>
+              {c.id} · {c.name}
+            </Tag>
+          );
+        })}
+        {conflicts.length === 0 && incomingScenario && (
           <Tag tone="accent">{incomingScenario}</Tag>
-        ) : (
-          <Tag tone="accent">SCN-0147 · Hormuz</Tag>
         )}
-        <Tag>SCN-0152 · Red Sea</Tag>
-        <Tag>SCN-0155 · Iran L10</Tag>
         <span style={{ flex: 1 }} />
         <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-3)" }}>
           Citation verification: ON ·{" "}
