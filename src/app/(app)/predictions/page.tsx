@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDownIcon } from "@heroicons/react/24/outline";
-import { api, type ApiPrediction, type ApiSignal } from "@/lib/api";
+import { api, type ApiPrediction, type ApiSignal, type ApiConflict } from "@/lib/api";
 import { useApiData } from "@/hooks/use-api-data";
 import { Tag } from "@/components/ui/tag";
 import { useTweaks } from "@/components/layout/tweaks-panel";
@@ -177,7 +177,7 @@ function ScenarioCard({
   const confidenceTone =
     prediction.confidence === "HIGH"
       ? "critical"
-      : prediction.confidence === "MEDIUM"
+      : prediction.confidence === "MED"
       ? "warn"
       : ("info" as const);
 
@@ -526,6 +526,20 @@ export default function PredictionsPage() {
     pollInterval: 30_000,
   });
 
+  const { data: conflicts } = useApiData<ApiConflict[]>({
+    fetcher: () => api.conflicts(),
+    fallback: [],
+    pollInterval: 0,
+  });
+
+  const regionOptions = useMemo(() => {
+    const regions = [...new Set(conflicts.map((c) => c.region).filter(Boolean))];
+    return [
+      { v: "all", l: "All" },
+      ...regions.map((r) => ({ v: r.toLowerCase(), l: r })),
+    ];
+  }, [conflicts]);
+
   const [region, setRegion] = useState("all");
   const [confidence, setConfidence] = useState("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -651,12 +665,7 @@ export default function PredictionsPage() {
           label="Region"
           value={region}
           onChange={setRegion}
-          options={[
-            { v: "all", l: "All" },
-            { v: "gulf", l: "Persian Gulf" },
-            { v: "red sea", l: "Red Sea" },
-            { v: "iran", l: "Iran" },
-          ]}
+          options={regionOptions.length > 1 ? regionOptions : [{ v: "all", l: "All" }]}
         />
         <FilterGroup
           label="Confidence"
@@ -665,7 +674,7 @@ export default function PredictionsPage() {
           options={[
             { v: "all", l: "All" },
             { v: "HIGH", l: "High" },
-            { v: "MEDIUM", l: "Medium" },
+            { v: "MED", l: "Medium" },
             { v: "LOW", l: "Low" },
           ]}
         />
